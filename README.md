@@ -110,15 +110,33 @@ esptool.py --port /dev/ttyUSB0 chip_id
 
 ---
 
-## 🕹️ Mod Permainan & Kawalan
+## 🕹️ Permainan: Ular & Tangga (Satoshi Touch Edition)
 
-| Mod Permainan | Kawalan Asas | Penerangan |
-|---|---|---|
-| **Space Invaders** | Kiri / Kanan / Tembak | Menembak armada musuh di angkasa sambil melombong blok BTC. |
-| **Flappy Nerd** | Butang Lompat (Tap) | Elakkan halangan paip blockchain untuk mengumpul Satoshi. |
-| **Nerd-Tetris** | Kiri / Kanan / Pusing / Jatuh | Susun blok transaksi sehingga menjadi blok yang padu. |
-| **Snake Classic** | D-Pad 4 Hala | Kawal ular memakan nonce dan blok hadiah. |
-| **Mining Dashboard** | Butang Tukar (Toggle) | Paparan papan pemuka statistik NerdMiner klasik. |
+Permainan ini direka khusus untuk **skrin sentuh (Touchscreen)** papan ESP32 tanpa memerlukan sebarang gamepad fizikal!
+
+### Peraturan & Mekanik Permainan:
+1. **Grid Papan (30 Petak)**:
+   - Terletak di bahagian kiri skrin (1 hingga 30).
+   - Matlamat utama: Capai petak **30 (All-Time High / ATH)** untuk memenangi pusingan!
+2. **Token Pemain vs Satoshi Bot**:
+   - 🔵 **P1 (Cyan / Anda)**: Token pemain anda.
+   - 🔴 **Bot (Merah / Satoshi Bot)**: Bot saingan yang bermain secara automatik.
+3. **Tangga (Bull Run Shortcuts 🚀)**:
+   - **Petak 3 -> 11**: *Bull Run (+8)*
+   - **Petak 8 -> 17**: *Halving Pump (+9)*
+   - **Petak 15 -> 26**: *Lightning Network Shortcut (+11)*
+   - **Petak 21 -> 29**: *ATH Breakout (+8)*
+4. **Ular (Bear Market Dips 📉)**:
+   - **Petak 14 -> 4**: *Kena Ular FUD (-10)*
+   - **Petak 19 -> 9**: *Bear Market Dip (-10)*
+   - **Petak 24 -> 12**: *Crypto Winter (-12)*
+   - **Petak 28 -> 16**: *Whale Dump (-12)*
+5. **Cara Kawalan Mudah**:
+   - Hanya **SENTUH (TAP)** pada butang hijau besar **`TAP DADU 🎲`** di sebelah kanan skrin untuk membaling dadu.
+   - *(Pilihan alternatif: Anda juga boleh menekan butang fizikal **BOOT** pada papan untuk membaling dadu).*
+6. **Mini Mining HUD & Screensaver**:
+   - **Core 0** sentiasa melombong Bitcoin di latar belakang dengan paparan Mini HUD masa nyata di bahagian atas.
+   - Jika tiada sentuhan selama 40 saat, skrin beralih secara automatik ke **Mining Dashboard** penuh. Sentuh mana-mana bahagian skrin untuk terus menyambung permainan!
 
 ---
 
@@ -146,10 +164,22 @@ esptool.py --port /dev/ttyUSB0 chip_id
    pio run -e cyd_2432s028 -t upload --upload-port /dev/ttyUSB0
    ```
 
-4. **Konfigurasi Rangkaian & Wallet**:
-   - Sambung ke WiFi hotspot bernama `NerdMinerAP`.
-   - Buka pelayar web di `192.168.4.1`.
-   - Masukkan SSID WiFi rumah, kata laluan, dan alamat dompet Bitcoin anda.
+## 🌐 Pengurusan WiFi & Web Portal (Captive Portal)
+
+Sistem dilengkapi ciri sambungan pintar automatik dan portal web terbina di dalam mikropengawal ESP32:
+
+1. **Sambungan Automatik (NVS Flash Memory)**:
+   - Sistem akan mencuba menyambung ke WiFi yang telah dikonfigurasikan (cth: `Kula Diamond`).
+2. **Web Config Portal Automatik (Sekiranya WiFi Terputus / Belum Dikonfigurasi)**:
+   - Sekiranya sambungan tidak berjaya dalam tempoh 14 saat, peranti akan melancarkan hotspot Access Point (AP) sendiri:
+     - **Nama WiFi Hotspot**: `GameMinerd-WiFi`
+     - **Kata Laluan Hotspot**: `12345678`
+     - **Alamat IP Portal**: `192.168.4.1`
+   - Buka pelayar web di telefon pintar atau komputer pada `http://192.168.4.1` untuk:
+     - Memasukkan nama WiFi (SSID) & kata laluan baharu.
+     - Memasukkan alamat dompet Bitcoin (BTC Wallet).
+     - Menukar pelayan mining pool (Stratum).
+   - Tekan **Simpan & Sambung Semula** — tetapan disimpan secara kekal di dalam memori flash (NVS) dan peranti akan menyambung ke internet secara automatik!
 
 ---
 
