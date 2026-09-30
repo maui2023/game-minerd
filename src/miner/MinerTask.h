@@ -23,4 +23,9 @@ void toggleMiningPoolMode();
  */
 bool isMiningPoolMode();
 
+/**
+ * @brief Jalankan kelompok pengiraan SHA-256 di Core 1 semasa Game Idle (Dual CPU Turbo)
+ */
+void runMiningWorkerCore1(uint32_t batchSize = 10000);
+
 #endif // MINER_TASK_H

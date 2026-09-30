@@ -7,9 +7,20 @@
 #include <ESPmDNS.h>
 #include <Preferences.h>
 #include <mbedtls/sha256.h>
+#include <atomic>
 
 // Definisi objek pengurus statistik global
 MinerDataManager g_minerData;
+
+// Pembolehubah perkongsian Midstate untuk Perlombongan Dual CPU (Core 0 + Core 1)
+static uint32_t g_sharedMidstate[8];
+static uint32_t g_sharedMerkleTail = 0;
+static uint32_t g_sharedNtime = 0;
+static uint32_t g_sharedNbits = 0;
+static volatile bool g_midstateReady = false;
+static std::atomic<uint32_t> g_hashesBatchAccumulator(0);
+static std::atomic<uint32_t> g_core1Nonce(0x80000000);
+static volatile unsigned long g_lastCore1HashTime = 0;
 
 // Objek storan kekal NVS & Web Server
 static Preferences g_prefs;
@@ -211,7 +222,8 @@ static void handleApiStats() {
     json += "\"wifiConnected\":" + String(s.isWifiConnected ? "true" : "false") + ",";
     json += "\"wifiSSID\":\"" + String(s.wifiSSID) + "\",";
     json += "\"ip\":\"" + String(s.ipAddress) + "\",";
-    json += "\"pool\":\"" + String(s.activePool) + "\"";
+    json += "\"pool\":\"" + String(s.activePool) + "\",";
+    json += "\"dualCpu\":" + String(s.isDualCpuActive ? "true" : "false");
     json += "}";
     g_server.send(200, "application/json", json);
 }
@@ -483,6 +495,79 @@ static void compute_midstate(const uint8_t chunk1[64], uint32_t midstate[8]) {
     sha256_compress(midstate, W);
 }
 
+void runMiningWorkerCore1(uint32_t batchSize) {
+    if (!g_midstateReady) return;
+
+    g_minerData.setDualCpuActive(true);
+    g_lastCore1HashTime = millis();
+
+    uint32_t midstate[8];
+    memcpy(midstate, g_sharedMidstate, 32);
+
+    uint32_t W[64];
+    uint32_t W2[64];
+    uint32_t hash1[8];
+    uint32_t hash2[8];
+
+    W[0] = g_sharedMerkleTail;
+    W[1] = g_sharedNtime;
+    W[2] = g_sharedNbits;
+    W[4] = 0x80000000;
+    for (int k = 5; k < 15; k++) W[k] = 0;
+    W[15] = 0x00000280;
+
+    W2[8] = 0x80000000;
+    for (int k = 9; k < 15; k++) W2[k] = 0;
+    W2[15] = 0x00000100;
+
+    uint32_t localNonce = g_core1Nonce.load(std::memory_order_relaxed);
+
+    for (uint32_t i = 0; i < batchSize; i++) {
+        localNonce++;
+        W[3] = SWAP32(localNonce);
+
+        for (int k = 16; k < 64; k++) {
+            W[k] = s1(W[k - 2]) + W[k - 7] + s0(W[k - 15]) + W[k - 16];
+        }
+
+        memcpy(hash1, midstate, 32);
+        sha256_compress(hash1, W);
+
+        for (int k = 0; k < 8; k++) {
+            W2[k] = hash1[k];
+        }
+        for (int k = 16; k < 64; k++) {
+            W2[k] = s1(W2[k - 2]) + W2[k - 7] + s0(W2[k - 15]) + W2[k - 16];
+        }
+
+        memcpy(hash2, SHA256_INITIAL, 32);
+        sha256_compress(hash2, W2);
+
+        if (hash2[7] == 0) {
+            double estimatedDiff = 65536.0 / ((hash2[6] >> 16) + 1);
+            g_minerData.updateMiningProgress(0, 0, estimatedDiff);
+
+            if (g_stratumConnected && g_stratumClient.connected() && g_currentJobId.length() > 0) {
+                char nonceHex[9];
+                snprintf(nonceHex, sizeof(nonceHex), "%08x", SWAP32(localNonce));
+                String submitMsg = "{\"id\": 4, \"method\": \"mining.submit\", \"params\": [\"" + 
+                                   g_activeWallet + ".cyd\", \"" + g_currentJobId + "\", \"00000000\", \"" + 
+                                   g_currentNtime + "\", \"" + String(nonceHex) + "\"]}\n";
+                g_stratumClient.print(submitMsg);
+                Serial.printf("[CORE 1 DUAL CPU] Menghantar Share! Nonce: %s (Diff: %.2f)\n", nonceHex, estimatedDiff);
+            }
+
+            if (hash2[6] == 0) {
+                Serial.println("[CORE 1] !!! BLOK BITCOIN SAH DITEMUI OLEH CORE 1 !!!");
+                g_minerData.triggerBlockFound();
+            }
+        }
+    }
+
+    g_core1Nonce.store(localNonce, std::memory_order_relaxed);
+    g_hashesBatchAccumulator.fetch_add(batchSize, std::memory_order_relaxed);
+}
+
 void minerTaskLoop(void* parameter) {
     Serial.println("[CORE 0] MinerTask dimulakan: Optimized Bare-Metal Midstate Mining Engine");
 
@@ -549,6 +634,13 @@ void minerTaskLoop(void* parameter) {
     uint32_t merkle_tail = SWAP32(((uint32_t*)&g_blockHeader[64])[0]);
     uint32_t ntime       = SWAP32(((uint32_t*)&g_blockHeader[64])[1]);
     uint32_t nbits       = SWAP32(((uint32_t*)&g_blockHeader[64])[2]);
+
+    // Perkongsian midstate kepada Core 1 untuk mod Dual CPU Max Hash
+    memcpy(g_sharedMidstate, midstate, 32);
+    g_sharedMerkleTail = merkle_tail;
+    g_sharedNtime = ntime;
+    g_sharedNbits = nbits;
+    g_midstateReady = true;
 
     uint32_t nonce = 0;
     uint32_t lastHashCount = 0;
@@ -657,24 +749,27 @@ void minerTaskLoop(void* parameter) {
                 }
             }
         }
+        g_hashesBatchAccumulator.fetch_add(10000, std::memory_order_relaxed);
 
-        // Kira Hashrate setiap saat
+        // Kira Hashrate setiap saat (Gabungan Core 0 + Core 1 jika aktif)
         unsigned long now = millis();
         unsigned long elapsed = now - lastReportTime;
         static unsigned long lastSerialPrint = 0;
         if (elapsed >= 1000) {
-            uint32_t hashesDone = nonce - lastHashCount;
+            uint32_t hashesDone = g_hashesBatchAccumulator.exchange(0);
             float hashrate_kH = (float)hashesDone / (float)elapsed;
 
+            bool isDual = (now - g_lastCore1HashTime < 2000);
+            g_minerData.setDualCpuActive(isDual);
             g_minerData.updateMiningProgress(hashrate_kH, hashesDone, 0.0);
 
             if (now - lastSerialPrint >= 3000) {
-                Serial.printf("[MINER Core 0] Hashrate: %.2f kH/s | Nonce: %u | RSSI: %d dBm | IP: %s\n",
-                              hashrate_kH, nonce, WiFi.RSSI(), WiFi.localIP().toString().c_str());
+                Serial.printf("[MINER Core 0] Hashrate: %.2f kH/s [%s] | Nonce: %u | IP: %s\n",
+                              hashrate_kH, isDual ? "DUAL CPU MAX HASH (Core 0 + 1)" : "Core 0",
+                              nonce, WiFi.localIP().toString().c_str());
                 lastSerialPrint = now;
             }
 
-            lastHashCount = nonce;
             lastReportTime = now;
         }
 

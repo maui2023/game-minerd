@@ -20,6 +20,7 @@ struct MinerStats {
     char btcAddress[64];        // Alamat dompet Bitcoin pelombong
     char wifiSSID[32];          // Nama WiFi (SSID) yang disambungkan
     char ipAddress[24];         // Alamat IP peranti
+    bool isDualCpuActive;       // Mod Dual CPU Max Hash aktif (Game Idle)
 };
 
 class MinerDataManager {
@@ -37,10 +38,18 @@ public:
         stats.isWifiConnected = false;
         stats.isPoolConnected = false;
         stats.blockFoundAlert = false;
-        strncpy(stats.activePool, "public-pool.io:21496", sizeof(stats.activePool) - 1);
+        stats.isDualCpuActive = false;
+        strncpy(stats.activePool, "public-pool.io:3333", sizeof(stats.activePool) - 1);
         strncpy(stats.btcAddress, "bc1q...", sizeof(stats.btcAddress) - 1);
         strncpy(stats.wifiSSID, "Scanning...", sizeof(stats.wifiSSID) - 1);
         strncpy(stats.ipAddress, "0.0.0.0", sizeof(stats.ipAddress) - 1);
+    }
+
+    void setDualCpuActive(bool active) {
+        if (xSemaphoreTake(mutex, pdMS_TO_TICKS(20)) == pdTRUE) {
+            stats.isDualCpuActive = active;
+            xSemaphoreGive(mutex);
+        }
     }
 
     void updateMiningProgress(float hashrate, uint32_t hashesIncrement, double diff) {
