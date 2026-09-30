@@ -8,6 +8,10 @@
 #include <Preferences.h>
 #include <mbedtls/sha256.h>
 #include <atomic>
+#include <SPI.h>
+#include <SD.h>
+#include <SPIFFS.h>
+#include <vector>
 
 // Definisi objek pengurus statistik global
 MinerDataManager g_minerData;
@@ -158,6 +162,46 @@ static const char HTML_CONFIG_PAGE[] PROGMEM = R"rawliteral(
             </form>
         </div>
 
+        <!-- Pengurus Katrij NES & Storan Kad SD -->
+        <div class="card" style="margin-top:20px;border:1px solid #10b981;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                <div style="font-weight:bold;color:#10b981;font-size:1.1rem;">
+                    🎮 Pengurus Katrij NES (Max 64KB)
+                </div>
+                <button type="button" onclick="rescanSd()" style="background:#059669;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:0.8rem;font-weight:bold;">🔄 Imbas Semula</button>
+            </div>
+            
+            <p style="font-size:12px;color:#94a3b8;margin-bottom:14px;line-height:1.4;">
+                Muat naik ROM NES baru (had <= 64KB kerana had SRAM ESP32 tanpa PSRAM) atau mainkan terus di skrin konsol CYD anda.
+            </p>
+
+            <!-- Borang Muat Naik ROM -->
+            <form method="POST" action="/upload_rom" enctype="multipart/form-data" style="background:#0f172a;border:1px solid #334155;border-radius:8px;padding:12px;margin-bottom:14px;">
+                <label style="color:#cbd5e1;font-size:12px;font-weight:bold;display:block;margin-bottom:6px;">⬆️ Muat Naik Fail .nes Baru:</label>
+                <div style="display:flex;gap:8px;">
+                    <input type="file" name="rom" accept=".nes" required style="flex:1;padding:8px;background:#1e293b;border:1px solid #475569;border-radius:6px;color:#fff;font-size:12px;">
+                    <button type="submit" class="btn-submit" style="width:auto;margin:0;padding:8px 16px;font-size:13px;white-space:nowrap;background:linear-gradient(135deg,#0284c7,#0369a1);">Muat Naik</button>
+                </div>
+                <div style="font-size:11px;color:#64748b;margin-top:5px;">* Fail akan disimpan terus ke folder <code>/nes/</code> pada kad MicroSD.</div>
+            </form>
+
+            <!-- Game Terbina Dalam (Built-in Flash) -->
+            <div style="background:#0f172a;border:1px solid #eab308;border-radius:8px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+                <div>
+                    <div style="font-weight:bold;color:#facc15;font-size:13px;">★ Ice Climber (Built-in Flash)</div>
+                    <div style="font-size:11px;color:#94a3b8;">Saiz: 24.6 KB | Sedia Dimainkan Terus (Zero-Copy Flash)</div>
+                </div>
+                <button type="button" onclick="playRom('Ice Climber.nes')" style="background:#eab308;color:#000;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:12px;">▶ Main di CYD</button>
+            </div>
+
+            <!-- Status Slot MicroSD & Senarai Game -->
+            <div id="sd-status-box" style="background:#0f172a;padding:12px;border-radius:8px;font-size:0.9rem;">
+                <div id="sd-info" style="color:#94a3b8;">Sedang mengimbas slot kad MicroSD CYD...</div>
+                <div id="sd-folders" style="margin-top:6px;font-size:0.8rem;color:#64748b;"></div>
+                <div id="sd-games-list" style="margin-top:10px;max-height:260px;overflow-y:auto;"></div>
+            </div>
+        </div>
+
         <div class="footer">
             Peranti ini boleh diakses bila-bila masa melalui alamat IP atau <br>
             <b>http://game-minerd.local</b> semasa berada dalam rangkaian yang sama.
@@ -187,6 +231,74 @@ static const char HTML_CONFIG_PAGE[] PROGMEM = R"rawliteral(
                 })
                 .catch(() => {});
         }
+        function updateSdInfo(forceRescan) {
+            const url = forceRescan ? '/api/sd?rescan=1' : '/api/sd';
+            fetch(url)
+                .then(res => res.json())
+                .then(d => {
+                    const info = document.getElementById('sd-info');
+                    const gamesList = document.getElementById('sd-games-list');
+                    const folders = document.getElementById('sd-folders');
+                    if (d.mounted) {
+                        info.innerHTML = '<span style="color:#34d399;font-weight:bold;">✅ Kad MicroSD Dikesan! (' + d.cardType + ', ' + (d.cardSizeMB > 1024 ? (d.cardSizeMB/1024).toFixed(1) + ' GB' : d.cardSizeMB + ' MB') + ')</span><br>' +
+                                         'Folder: <b>' + d.detectedFolder + '</b> | Game Serasi (<=64KB): <b>' + (d.items ? d.items.length : 0) + ' game</b>';
+                        if (d.rootFolders && d.rootFolders.length > 0) {
+                            folders.innerHTML = 'Folder di kad: <span style="color:#94a3b8;">' + d.rootFolders.slice(0, 10).join(', ') + '</span>';
+                        }
+                        let html = '';
+                        if (d.items && d.items.length > 0) {
+                            d.items.forEach(item => {
+                                const isBuiltin = (item.filename === 'Ice Climber.nes');
+                                html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid #1e293b;">';
+                                html += '  <div>';
+                                html += '    <div style="font-size:13px;font-weight:600;color:#fff;">🎮 ' + item.displayName + '</div>';
+                                html += '    <div style="font-size:11px;color:#94a3b8;">' + item.sizeKB + ' KB ' + (item.sizeKB <= 64 ? '<span style=\"color:#34d399;font-weight:bold;\">[Siap Main]</span>' : '<span style=\"color:#f87171;\">[Melebihi Had]</span>') + '</div>';
+                                html += '  </div>';
+                                html += '  <div style="display:flex;gap:6px;">';
+                                html += '    <button type="button" onclick="playRom(\'' + encodeURIComponent(item.filename) + '\')" style="background:#059669;color:#fff;border:none;padding:5px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:bold;">▶ Main</button>';
+                                if (!isBuiltin) {
+                                    html += '    <button type="button" onclick="deleteRom(\'' + encodeURIComponent(item.filename) + '\')" style="background:#dc2626;color:#fff;border:none;padding:5px 8px;border-radius:6px;cursor:pointer;font-size:11px;">🗑️</button>';
+                                }
+                                html += '  </div>';
+                                html += '</div>';
+                            });
+                        } else {
+                            html = '<div style="color:#fbbf24;padding:8px 0;">Tiada game <=64KB di kad. Sila muat naik fail .nes di atas.</div>';
+                        }
+                        gamesList.innerHTML = html;
+                    } else {
+                        info.innerHTML = '<span style="color:#f87171;">⚠️ ' + (d.error || 'Kad MicroSD Belum Dikesan / Format Bukan FAT32') + '</span>';
+                        gamesList.innerHTML = '';
+                        folders.innerHTML = '';
+                    }
+                })
+                .catch(() => {});
+        }
+        function playRom(name) {
+            const decName = decodeURIComponent(name);
+            if (!confirm('Mulakan game "' + decName + '" pada skrin konsol CYD?')) return;
+            fetch('/api/play_rom?name=' + name, { method: 'POST' })
+                .then(res => res.json())
+                .then(d => {
+                    alert(d.msg || 'Game dimulakan di skrin CYD!');
+                })
+                .catch(e => alert('Ralat memulakan game: ' + e));
+        }
+        function deleteRom(name) {
+            const decName = decodeURIComponent(name);
+            if (!confirm('Padam fail "' + decName + '" dari kad SD?')) return;
+            fetch('/api/delete_rom?name=' + name, { method: 'POST' })
+                .then(res => res.json())
+                .then(d => {
+                    alert('Fail berjaya dipadam dari kad SD!');
+                    updateSdInfo(true);
+                })
+                .catch(e => alert('Ralat memadam fail: ' + e));
+        }
+        function rescanSd() {
+            document.getElementById('sd-info').innerText = 'Sedang mengimbas semula slot MicroSD CYD...';
+            updateSdInfo(true);
+        }
         function setPreset(mode) {
             document.getElementById('input-pool').value = 'public-pool.io';
             if (mode === 'solo') {
@@ -197,6 +309,7 @@ static const char HTML_CONFIG_PAGE[] PROGMEM = R"rawliteral(
         }
         setInterval(updateStats, 2000);
         updateStats();
+        updateSdInfo(false);
     </script>
 </body>
 </html>
@@ -226,6 +339,513 @@ static void handleApiStats() {
     json += "\"dualCpu\":" + String(s.isDualCpuActive ? "true" : "false");
     json += "}";
     g_server.send(200, "application/json", json);
+}
+
+// Pengendali Perkakasan Kad MicroSD (Slot CYD: SCK=18, MISO=19, MOSI=23, CS=5)
+static SPIClass g_sdSPI(VSPI);
+static bool g_sdMounted = false;
+static unsigned long g_lastSdAttempt = 0;
+static SemaphoreHandle_t g_sdMutex = NULL;
+
+struct CachedSdInfo {
+    bool scanned = false;
+    bool mounted = false;
+    String cardType = "UNKNOWN";
+    uint64_t cardSizeMB = 0;
+    String detectedFolder = "";
+    std::vector<SdGameItem> gameItems;
+    std::vector<String> games;
+    std::vector<String> rootFolders;
+};
+static CachedSdInfo g_sdCache;
+
+static bool g_spiffsMounted = false;
+static bool initSpiffsSafe() {
+    if (g_spiffsMounted) return true;
+    if (SPIFFS.begin(true)) {
+        g_spiffsMounted = true;
+        Serial.printf("[SPIFFS] Flash storan aktif! Total: %u KB, Used: %u KB\n",
+                      (unsigned int)(SPIFFS.totalBytes() / 1024), (unsigned int)(SPIFFS.usedBytes() / 1024));
+        return true;
+    }
+    Serial.println("[SPIFFS] Gagal mount SPIFFS.");
+    return false;
+}
+
+static bool mountSD() {
+    if (g_sdMounted) return true;
+    if (g_sdMutex == NULL) g_sdMutex = xSemaphoreCreateMutex();
+    if (xSemaphoreTake(g_sdMutex, pdMS_TO_TICKS(1500)) != pdTRUE) return false;
+
+    if (g_sdMounted) {
+        xSemaphoreGive(g_sdMutex);
+        return true;
+    }
+
+    if (millis() - g_lastSdAttempt < 10000) {
+        xSemaphoreGive(g_sdMutex);
+        return false;
+    }
+    g_lastSdAttempt = millis();
+
+    SD.end();
+    pinMode(5, OUTPUT);
+    digitalWrite(5, HIGH);
+    delay(10);
+
+    g_sdSPI.end();
+    g_sdSPI.begin(18, 19, 23, 5);
+    delay(20);
+
+    bool ok = SD.begin(5, g_sdSPI, 4000000);
+    if (!ok) {
+        ok = SD.begin(5, g_sdSPI, 1000000);
+    }
+
+    Serial.printf("[SD DBG] SD.begin returned %s\n", ok ? "TRUE" : "FALSE");
+    if (ok) {
+        g_sdMounted = true;
+        uint64_t sz = SD.cardSize() / (1024 * 1024);
+        Serial.printf("[SD CARD] Kad berjaya dikesan! Saiz: %llu MB\n", sz);
+    } else {
+        Serial.println("[SD CARD] Tidak dapat memulakan kad SD. Sila pastikan dimasukkan kemas.");
+    }
+    xSemaphoreGive(g_sdMutex);
+    return g_sdMounted;
+}
+
+static String g_pendingRomName = "";
+static bool g_hasPendingRom = false;
+
+bool checkPendingRomRequest(String& outName) {
+    if (g_hasPendingRom) {
+        outName = g_pendingRomName;
+        g_hasPendingRom = false;
+        return true;
+    }
+    return false;
+}
+
+static void scanSdCardSafe(bool forceRescan = false) {
+    if (g_sdCache.scanned && !forceRescan) return;
+
+    bool sdOk = mountSD();
+    g_sdCache.mounted = sdOk;
+
+    if (sdOk) {
+        if (g_sdMutex == NULL) g_sdMutex = xSemaphoreCreateMutex();
+        if (xSemaphoreTake(g_sdMutex, pdMS_TO_TICKS(2000)) == pdTRUE) {
+            uint8_t cType = SD.cardType();
+            g_sdCache.cardType = (cType == CARD_MMC) ? "MMC" :
+                                 (cType == CARD_SD) ? "SDSC" :
+                                 (cType == CARD_SDHC) ? "SDHC/SDXC" : "SD";
+            g_sdCache.cardSizeMB = SD.cardSize() / (1024 * 1024);
+            g_sdCache.rootFolders = {"nes", "roms", "arcade", "mame", "famicom"};
+
+            if (!SD.exists("/nes")) SD.mkdir("/nes");
+            xSemaphoreGive(g_sdMutex);
+        }
+    }
+
+    g_sdCache.games.clear();
+    g_sdCache.gameItems.clear();
+
+    // 1. Sentiasa sediakan Ice Climber sebagai game terbina dalam (Built-in Flash)
+    SdGameItem builtinItem;
+    builtinItem.filename = "Ice Climber.nes";
+    builtinItem.displayName = "★ Ice Climber";
+    builtinItem.sizeKB = 25;
+    builtinItem.isCompatible = true;
+    g_sdCache.gameItems.push_back(builtinItem);
+    g_sdCache.games.push_back("Ice Climber.nes (25 KB - Built-in Flash)");
+
+    // 2. Imbas dari Kad SD jika ada
+    if (sdOk) {
+        if (g_sdMutex == NULL) g_sdMutex = xSemaphoreCreateMutex();
+        if (xSemaphoreTake(g_sdMutex, pdMS_TO_TICKS(2000)) == pdTRUE) {
+            const char* targetFolder = NULL;
+            if (SD.exists("/nes")) targetFolder = "/nes";
+            else if (SD.exists("/roms/nes")) targetFolder = "/roms/nes";
+            else if (SD.exists("/famicom")) targetFolder = "/famicom";
+
+            g_sdCache.detectedFolder = targetFolder ? String(targetFolder) : "/nes";
+
+            if (targetFolder) {
+                File dir = SD.open(targetFolder);
+                if (dir && dir.isDirectory()) {
+                    File f = dir.openNextFile();
+                    int scanned = 0;
+                    while (f && g_sdCache.gameItems.size() < 40 && scanned < 600) {
+                        scanned++;
+                        if (!f.isDirectory()) {
+                            const char* fn = f.name();
+                            if (fn) {
+                                String sName = String(fn);
+                                int lastSlash = sName.lastIndexOf('/');
+                                if (lastSlash >= 0) sName = sName.substring(lastSlash + 1);
+                                String lower = sName;
+                                lower.toLowerCase();
+                                if (lower.endsWith(".nes")) {
+                                    if (lower != "ice climber.nes" && lower != "ice_climber.nes") {
+                                        uint32_t szKB = (f.size() + 1023) / 1024;
+                                        if (szKB <= 64) {
+                                            SdGameItem item;
+                                            item.filename = sName;
+                                            String clean = sName;
+                                            if (clean.endsWith(".nes") || clean.endsWith(".NES")) {
+                                                clean = clean.substring(0, clean.length() - 4);
+                                            }
+                                            item.displayName = clean;
+                                            item.sizeKB = szKB;
+                                            item.isCompatible = true;
+                                            g_sdCache.gameItems.push_back(item);
+                                            g_sdCache.games.push_back(sName + " (" + String(szKB) + " KB)");
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        f.close();
+                        f = dir.openNextFile();
+                    }
+                    if (f) f.close();
+                    dir.close();
+                }
+            }
+            xSemaphoreGive(g_sdMutex);
+        }
+    }
+
+    // 3. Imbas Flash SPIFFS (Internal Storage) untuk sebarang ROM muat naik web
+    if (initSpiffsSafe()) {
+        File sDir = SPIFFS.open("/");
+        if (sDir) {
+            File f = sDir.openNextFile();
+            while (f && g_sdCache.gameItems.size() < 40) {
+                if (!f.isDirectory()) {
+                    String fn = String(f.name());
+                    int lastSlash = fn.lastIndexOf('/');
+                    if (lastSlash >= 0) fn = fn.substring(lastSlash + 1);
+                    String lower = fn;
+                    lower.toLowerCase();
+                    if (lower.endsWith(".nes")) {
+                        bool dup = false;
+                        for (const auto& gi : g_sdCache.gameItems) {
+                            if (gi.filename.equalsIgnoreCase(fn)) { dup = true; break; }
+                        }
+                        if (!dup) {
+                            uint32_t szKB = (f.size() + 1023) / 1024;
+                            if (szKB <= 64) {
+                                SdGameItem item;
+                                item.filename = fn;
+                                String clean = fn;
+                                if (clean.endsWith(".nes") || clean.endsWith(".NES")) clean = clean.substring(0, clean.length() - 4);
+                                item.displayName = clean;
+                                item.sizeKB = szKB;
+                                item.isCompatible = true;
+                                g_sdCache.gameItems.push_back(item);
+                                g_sdCache.games.push_back(fn + " (" + String(szKB) + " KB - Flash)");
+                            }
+                        }
+                    }
+                }
+                f.close();
+                f = sDir.openNextFile();
+            }
+            if (f) f.close();
+            sDir.close();
+        }
+    }
+
+    g_sdCache.scanned = true;
+    Serial.printf("[SD/FLASH] Imbasan siap. Total game serasi (<=64KB): %d\n", (int)g_sdCache.gameItems.size());
+}
+
+bool isSdCardMounted() {
+    return g_sdMounted;
+}
+
+String getSdDetectedFolder() {
+    return g_sdCache.detectedFolder;
+}
+
+std::vector<SdGameItem> getSdGameList(bool forceRescan) {
+    scanSdCardSafe(forceRescan);
+    if (g_sdCache.gameItems.empty()) {
+        SdGameItem builtinItem;
+        builtinItem.filename = "Ice Climber.nes";
+        builtinItem.displayName = "★ Ice Climber";
+        builtinItem.sizeKB = 25;
+        builtinItem.isCompatible = true;
+        g_sdCache.gameItems.push_back(builtinItem);
+    }
+    return g_sdCache.gameItems;
+}
+
+uint8_t* readSdFileToBuffer(const char* sdPath, size_t* outSize) {
+    if (!outSize) return NULL;
+    *outSize = 0;
+    if (!sdPath || strlen(sdPath) == 0) return NULL;
+
+    String cleanPath = String(sdPath);
+    while (cleanPath.indexOf("//") >= 0) cleanPath.replace("//", "/");
+    if (!cleanPath.startsWith("/")) cleanPath = "/" + cleanPath;
+
+    String basename = cleanPath;
+    int lastSlash = basename.lastIndexOf('/');
+    if (lastSlash >= 0) basename = basename.substring(lastSlash + 1);
+
+    File f;
+    bool fromSpiffs = false;
+
+    // 1. Cuba baca dari Kad MicroSD (jika mounted)
+    if (mountSD()) {
+        if (g_sdMutex == NULL) g_sdMutex = xSemaphoreCreateMutex();
+        if (xSemaphoreTake(g_sdMutex, pdMS_TO_TICKS(2000)) == pdTRUE) {
+            f = SD.open(cleanPath.c_str());
+            if (!f) f = SD.open(("/nes/" + basename).c_str());
+            if (!f) f = SD.open(("/roms/nes/" + basename).c_str());
+            if (!f) f = SD.open(("/" + basename).c_str());
+            if (!f) xSemaphoreGive(g_sdMutex);
+        }
+    }
+
+    // 2. Jika tiada di SD, cuba baca dari Flash SPIFFS (muat naik web)
+    if (!f && initSpiffsSafe()) {
+        f = SPIFFS.open(("/" + basename).c_str());
+        if (!f) f = SPIFFS.open(("/nes/" + basename).c_str());
+        if (f) fromSpiffs = true;
+    }
+
+    if (!f) {
+        Serial.printf("[READ ROM] Fail tidak ditemui di SD atau Flash: '%s'\n", cleanPath.c_str());
+        return NULL;
+    }
+
+    size_t fileSize = f.size();
+    if (fileSize == 0 || fileSize > 80 * 1024) {
+        f.close();
+        if (!fromSpiffs && g_sdMutex) xSemaphoreGive(g_sdMutex);
+        return NULL;
+    }
+
+    uint8_t* buf = (uint8_t*)malloc(fileSize);
+    if (!buf) buf = (uint8_t*)heap_caps_malloc(fileSize, MALLOC_CAP_8BIT);
+    if (!buf) {
+        f.close();
+        if (!fromSpiffs && g_sdMutex) xSemaphoreGive(g_sdMutex);
+        return NULL;
+    }
+
+    size_t bytesRead = f.read(buf, fileSize);
+    f.close();
+    if (!fromSpiffs && g_sdMutex) xSemaphoreGive(g_sdMutex);
+
+    if (bytesRead != fileSize) {
+        free(buf);
+        return NULL;
+    }
+
+    *outSize = fileSize;
+    Serial.printf("[READ ROM] Berjaya baca %u bait (%s). freeHeap: %u\n",
+                  fileSize, fromSpiffs ? "Flash SPIFFS" : "Kad MicroSD", ESP.getFreeHeap());
+    return buf;
+}
+
+static void handleApiSd() {
+    bool force = g_server.hasArg("rescan");
+    scanSdCardSafe(force);
+
+    String json = "{\"mounted\":" + String(g_sdCache.mounted ? "true" : "false");
+    json += ",\"freeHeap\":" + String(ESP.getFreeHeap());
+    json += ",\"maxAllocHeap\":" + String(ESP.getMaxAllocHeap());
+
+    if (!g_sdCache.mounted) {
+        json += ",\"error\":\"Kad MicroSD belum dikesan atau bukan format FAT32 (Storan Flash ESP32 Aktif)\"";
+    } else {
+        json += ",\"cardType\":\"" + g_sdCache.cardType + "\"";
+        json += ",\"cardSizeMB\":" + String((unsigned long)g_sdCache.cardSizeMB);
+        json += ",\"detectedFolder\":\"" + g_sdCache.detectedFolder + "\"";
+        json += ",\"rootFolders\":[";
+        for (size_t i = 0; i < g_sdCache.rootFolders.size(); i++) {
+            if (i > 0) json += ",";
+            json += "\"" + g_sdCache.rootFolders[i] + "\"";
+        }
+        json += "]";
+    }
+
+    json += ",\"totalFound\":" + String(g_sdCache.gameItems.size());
+    json += ",\"items\":[";
+    for (size_t i = 0; i < g_sdCache.gameItems.size(); i++) {
+        if (i > 0) json += ",";
+        String fn = g_sdCache.gameItems[i].filename;
+        fn.replace("\"", "\\\"");
+        String dn = g_sdCache.gameItems[i].displayName;
+        dn.replace("\"", "\\\"");
+        json += "{\"filename\":\"" + fn + "\",\"displayName\":\"" + dn + "\",\"sizeKB\":" + String(g_sdCache.gameItems[i].sizeKB) + "}";
+    }
+    json += "]";
+    json += "}";
+    g_server.send(200, "application/json", json);
+}
+
+// --------------------------------------------------------------------------
+// Pengurus Muat Naik, Main, & Padam ROM NES Melalui WebGUI
+// --------------------------------------------------------------------------
+static File g_uploadFile;
+static size_t g_uploadBytes = 0;
+static bool g_uploadErr = false;
+static bool g_uploadUseSpiffs = false;
+
+static void handleRomUploadData() {
+    HTTPUpload& upload = g_server.upload();
+    if (upload.status == UPLOAD_FILE_START) {
+        g_uploadBytes = 0;
+        g_uploadErr = false;
+        g_uploadUseSpiffs = false;
+        String fn = upload.filename;
+        int lastSlash = fn.lastIndexOf('/');
+        if (lastSlash >= 0) fn = fn.substring(lastSlash + 1);
+        int lastBs = fn.lastIndexOf('\\');
+        if (lastBs >= 0) fn = fn.substring(lastBs + 1);
+
+        String lower = fn;
+        lower.toLowerCase();
+        if (!lower.endsWith(".nes")) {
+            Serial.println("[WEB UPLOAD] Ralat: Fail bukan format .nes!");
+            g_uploadErr = true;
+            return;
+        }
+
+        bool sdOk = mountSD();
+        if (sdOk) {
+            if (g_sdMutex == NULL) g_sdMutex = xSemaphoreCreateMutex();
+            if (xSemaphoreTake(g_sdMutex, pdMS_TO_TICKS(1500)) == pdTRUE) {
+                if (!SD.exists("/nes")) SD.mkdir("/nes");
+                String path = "/nes/" + fn;
+                if (SD.exists(path.c_str())) SD.remove(path.c_str());
+                g_uploadFile = SD.open(path.c_str(), FILE_WRITE);
+                if (!g_uploadFile) {
+                    xSemaphoreGive(g_sdMutex);
+                    sdOk = false;
+                }
+            } else {
+                sdOk = false;
+            }
+        }
+
+        if (!sdOk) {
+            // Simpan terus ke Flash SPIFFS dalaman ESP32 (tiada kad SD diperlukan!)
+            if (initSpiffsSafe()) {
+                g_uploadUseSpiffs = true;
+                String path = "/" + fn;
+                if (SPIFFS.exists(path.c_str())) SPIFFS.remove(path.c_str());
+                g_uploadFile = SPIFFS.open(path.c_str(), FILE_WRITE);
+                if (!g_uploadFile) {
+                    Serial.printf("[WEB UPLOAD] Gagal buka fail SPIFFS: '%s'\n", path.c_str());
+                    g_uploadErr = true;
+                    return;
+                }
+                Serial.printf("[WEB UPLOAD] Menerima fail ke Flash SPIFFS: '%s'...\n", path.c_str());
+            } else {
+                Serial.println("[WEB UPLOAD] Ralat: Kad SD dan SPIFFS kedua-duanya tidak sedia!");
+                g_uploadErr = true;
+                return;
+            }
+        } else {
+            Serial.printf("[WEB UPLOAD] Menerima fail ke Kad SD: '/nes/%s'...\n", fn.c_str());
+        }
+    } else if (upload.status == UPLOAD_FILE_WRITE) {
+        if (!g_uploadErr && g_uploadFile) {
+            g_uploadBytes += upload.currentSize;
+            if (g_uploadBytes > 80 * 1024) {
+                Serial.println("[WEB UPLOAD] Ralat: Saiz fail melebihi had RAM 80KB!");
+                g_uploadErr = true;
+                g_uploadFile.close();
+                if (!g_uploadUseSpiffs && g_sdMutex) xSemaphoreGive(g_sdMutex);
+            } else {
+                g_uploadFile.write(upload.buf, upload.currentSize);
+            }
+        }
+    } else if (upload.status == UPLOAD_FILE_END) {
+        if (g_uploadFile) {
+            g_uploadFile.close();
+            if (!g_uploadUseSpiffs && g_sdMutex) xSemaphoreGive(g_sdMutex);
+            Serial.printf("[WEB UPLOAD] Muat naik berjaya! Saiz: %u bait (%s)\n",
+                          (unsigned int)g_uploadBytes, g_uploadUseSpiffs ? "Flash SPIFFS" : "Kad MicroSD");
+            g_sdCache.scanned = false;
+        }
+    } else if (upload.status == UPLOAD_FILE_ABORTED) {
+        if (g_uploadFile) {
+            g_uploadFile.close();
+            if (!g_uploadUseSpiffs && g_sdMutex) xSemaphoreGive(g_sdMutex);
+        }
+        g_uploadErr = true;
+    }
+}
+
+static void handleRomUploadFinish() {
+    if (g_uploadErr) {
+        g_server.send(400, "text/html", "<html><body style='background:#0b0f19;color:#f87171;font-family:sans-serif;text-align:center;padding:40px;'><h2>Muat Naik Gagal!</h2><p>Pastikan fail berekstensi .nes dan saiz tidak melebihi 64KB (had RAM ESP32).</p><p><a href='/' style='color:#38bdf8;'>&larr; Kembali</a></p></body></html>");
+    } else {
+        String dest = g_uploadUseSpiffs ? "Flash SPIFFS Dalaman ESP32" : "Folder /nes/ pada Kad MicroSD";
+        g_server.send(200, "text/html", "<html><body style='background:#0b0f19;color:#34d399;font-family:sans-serif;text-align:center;padding:40px;'><h2>Katrij NES Berjaya Dimuat Naik!</h2><p style='color:#fff;'>Disimpan ke: <b>" + dest + "</b></p><p><a href='/' style='color:#38bdf8;text-decoration:none;'>&larr; Kembali ke Dashboard (Game siap main!)</a></p></body></html>");
+    }
+}
+
+static void handleApiPlayRom() {
+    String filename = g_server.arg("name");
+    if (filename.length() > 0) {
+        int lastSlash = filename.lastIndexOf('/');
+        if (lastSlash >= 0) filename = filename.substring(lastSlash + 1);
+        g_pendingRomName = filename;
+        g_hasPendingRom = true;
+        Serial.printf("[WEB] Permintaan main game: '%s'\n", filename.c_str());
+        g_server.send(200, "application/json", "{\"status\":\"ok\",\"msg\":\"Memulakan game di skrin CYD...\"}");
+        return;
+    }
+    g_server.send(400, "application/json", "{\"error\":\"Nama game kosong\"}");
+}
+
+static void handleApiDeleteRom() {
+    String filename = g_server.arg("name");
+    if (filename.length() > 0) {
+        int lastSlash = filename.lastIndexOf('/');
+        if (lastSlash >= 0) filename = filename.substring(lastSlash + 1);
+
+        bool deleted = false;
+        if (isSdCardMounted()) {
+            if (g_sdMutex == NULL) g_sdMutex = xSemaphoreCreateMutex();
+            if (xSemaphoreTake(g_sdMutex, pdMS_TO_TICKS(1500)) == pdTRUE) {
+                String path = "/nes/" + filename;
+                if (SD.exists(path.c_str())) {
+                    SD.remove(path.c_str());
+                    Serial.printf("[SD] Fail dipadam dari SD: '%s'\n", path.c_str());
+                    deleted = true;
+                }
+                xSemaphoreGive(g_sdMutex);
+            }
+        }
+        if (initSpiffsSafe()) {
+            String path = "/" + filename;
+            if (SPIFFS.exists(path.c_str())) {
+                SPIFFS.remove(path.c_str());
+                Serial.printf("[SPIFFS] Fail dipadam dari Flash: '%s'\n", path.c_str());
+                deleted = true;
+            }
+            path = "/nes/" + filename;
+            if (SPIFFS.exists(path.c_str())) {
+                SPIFFS.remove(path.c_str());
+                deleted = true;
+            }
+        }
+        g_sdCache.scanned = false;
+        if (deleted) {
+            g_server.send(200, "application/json", "{\"status\":\"ok\"}");
+            return;
+        }
+    }
+    g_server.send(400, "application/json", "{\"error\":\"Gagal memadam fail\"}");
 }
 
 static WiFiClient g_stratumClient;
@@ -331,6 +951,10 @@ static void webServerTask(void* parameter) {
                 g_server.on("/", HTTP_GET, handleRoot);
                 g_server.on("/save", HTTP_POST, handleSave);
                 g_server.on("/api/stats", HTTP_GET, handleApiStats);
+                g_server.on("/api/sd", HTTP_GET, handleApiSd);
+                g_server.on("/api/play_rom", handleApiPlayRom);
+                g_server.on("/api/delete_rom", handleApiDeleteRom);
+                g_server.on("/upload_rom", HTTP_POST, handleRomUploadFinish, handleRomUploadData);
                 g_server.on("/restart", HTTP_POST, handleRestart);
                 g_server.begin();
                 g_serverStarted = true;
@@ -338,7 +962,7 @@ static void webServerTask(void* parameter) {
             }
             g_server.handleClient();
         }
-        vTaskDelay(pdMS_TO_TICKS(5));
+        vTaskDelay(pdMS_TO_TICKS(15));
     }
 }
 
@@ -792,7 +1416,7 @@ void startMinerTask() {
     xTaskCreatePinnedToCore(
         webServerTask,
         "WebServerTask",
-        4096,
+        8192,
         NULL,
         1,
         NULL,

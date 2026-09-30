@@ -185,13 +185,17 @@ Sistem dilengkapi ciri sambungan pintar automatik dan portal web terbina di dala
 
 ## 🗺️ Pelan Hala Tuju Pembangunan (Roadmap)
 
-- [x] Analisis perkakasan & pengesanan port sambungan USB board (CH340 dikesan).
-- [ ] Rangka kerja dwi-teras FreeRTOS (Core 0: Stratum Solo Miner, Core 1: Render Loop).
-- [ ] Enjin permainan ringan berasaskan LovyanGFX / TFT_eSPI.
-- [ ] Permainan retro pertama: *Space Invaders: Satoshi Edition*.
-- [ ] Mini HUD hashrate dinamik semasa sesi permainan.
-- [ ] Pengurusan penggera visual dan audio apabila blok ditemui (*Block found celebration*).
-- [ ] Sokongan emulator 8-bit (NES / Game Boy) melalui kad MicroSD untuk ESP32-2432S028 (CYD).
+- [x] Analisis perkakasan & pengesanan port sambungan USB board (ESP32-CYD CH340 dikesan).
+- [x] Rangka kerja dwi-teras FreeRTOS (Core 0: Stratum Miner, Core 1: Render Loop).
+- [x] Enjin Midstate SHA-256 bare-metal pantas dengan sokongan Solo (3333) & Pool PPLNS (13333).
+- [x] Dual CPU Max Hash (~65-70 kH/s) apabila game berada dalam keadaan idle / screensaver.
+- [x] Enjin grafik 60 FPS pantas LovyanGFX dengan sifar flicker (zero flicker).
+- [x] Game 1: Papan Permainan Ular & Tangga Interaktif (1 hingga 4 Pemain + Bot Satoshi).
+- [x] Game 2: Retro NES 8-Bit Engine dengan On-Screen Virtual Touch Pad (D-Pad + A/B).
+- [x] Sokongan Slot Kad Memori MicroSD CYD (Perkakasan SPI Bebas: CS=5, SCK=18, MISO=19, MOSI=23).
+- [x] Pengesanan automatik kad konsol R35S (SDHC/SDXC 128GB) & penyenaraian koleksi Game NES dari direktori `/nes`.
+- [x] Game Hub Menu untuk pemilihan permainan secara lancar melalui skrin sentuh.
+- [x] Mini HUD hashrate dinamik dan penggera kemenangan blok Bitcoin (*Block Found Alert*).
 
 ---
 

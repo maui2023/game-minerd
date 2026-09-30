@@ -28,4 +28,43 @@ bool isMiningPoolMode();
  */
 void runMiningWorkerCore1(uint32_t batchSize = 10000);
 
+#include <vector>
+
+struct SdGameItem {
+    String filename;      // e.g. "0020 Tank Wars 2008 Accelerated Chinese Version.nes"
+    String displayName;   // e.g. "Tank Wars 2008"
+    uint32_t sizeKB;      // e.g. 24
+    bool isCompatible;    // <= 64KB fits in internal ESP32 SRAM
+};
+
+/**
+ * @brief Semak status penyambungan kad MicroSD CYD
+ */
+bool isSdCardMounted();
+
+/**
+ * @brief Dapatkan nama folder ROM NES yang dikesan (cth: "/nes")
+ */
+String getSdDetectedFolder();
+
+/**
+ * @brief Dapatkan senarai game NES daripada kad SD
+ */
+std::vector<SdGameItem> getSdGameList(bool forceRescan = false);
+
+/**
+ * @brief Baca fail dari kad SD ke dalam buffer RAM
+ * @param sdPath Laluan fail di kad SD (cth: "/nes/0022 Tetris.nes")
+ * @param outSize Penunjuk untuk menyimpan saiz fail yang dibaca
+ * @return Penunjuk ke buffer (caller mesti free()), atau NULL jika gagal
+ */
+uint8_t* readSdFileToBuffer(const char* sdPath, size_t* outSize);
+
+/**
+ * @brief Semak jika terdapat permintaan pelancaran ROM daripada WebGUI
+ * @param outName Penunjuk untuk menerima nama fail ROM
+ * @return true jika ada permintaan baru
+ */
+bool checkPendingRomRequest(String& outName);
+
 #endif // MINER_TASK_H
