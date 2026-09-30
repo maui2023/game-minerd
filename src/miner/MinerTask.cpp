@@ -185,20 +185,14 @@ static const char HTML_CONFIG_PAGE[] PROGMEM = R"rawliteral(
                 <div style="font-size:11px;color:#64748b;margin-top:5px;">* Fail akan disimpan terus ke folder <code>/nes/</code> pada kad MicroSD.</div>
             </form>
 
-            <!-- Game Terbina Dalam (Built-in Flash) -->
-            <div style="background:#0f172a;border:1px solid #eab308;border-radius:8px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
-                <div>
-                    <div style="font-weight:bold;color:#facc15;font-size:13px;">★ Ice Climber (Built-in Flash)</div>
-                    <div style="font-size:11px;color:#94a3b8;">Saiz: 24.6 KB | Sedia Dimainkan Terus (Zero-Copy Flash)</div>
-                </div>
-                <button type="button" onclick="playRom('Ice Climber.nes')" style="background:#eab308;color:#000;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:12px;">▶ Main di CYD</button>
-            </div>
-
-            <!-- Status Slot MicroSD & Senarai Game -->
+            <!-- Status Storan & Senarai Katrij Game -->
             <div id="sd-status-box" style="background:#0f172a;padding:12px;border-radius:8px;font-size:0.9rem;">
-                <div id="sd-info" style="color:#94a3b8;">Sedang mengimbas slot kad MicroSD CYD...</div>
+                <div id="sd-info" style="color:#94a3b8;">Sedang mengimbas storan game...</div>
                 <div id="sd-folders" style="margin-top:6px;font-size:0.8rem;color:#64748b;"></div>
                 <div id="sd-games-list" style="margin-top:10px;max-height:260px;overflow-y:auto;"></div>
+                <div style="text-align:right;margin-top:10px;padding-top:8px;border-top:1px dashed #334155;">
+                    <button type="button" onclick="restoreBuiltin()" style="background:#1e293b;color:#94a3b8;border:1px solid #475569;padding:4px 10px;border-radius:6px;cursor:pointer;font-size:11px;">🔄 Pulihkan Game Asal (Ice Climber)</button>
+                </div>
             </div>
         </div>
 
@@ -241,36 +235,35 @@ static const char HTML_CONFIG_PAGE[] PROGMEM = R"rawliteral(
                     const folders = document.getElementById('sd-folders');
                     if (d.mounted) {
                         info.innerHTML = '<span style="color:#34d399;font-weight:bold;">✅ Kad MicroSD Dikesan! (' + d.cardType + ', ' + (d.cardSizeMB > 1024 ? (d.cardSizeMB/1024).toFixed(1) + ' GB' : d.cardSizeMB + ' MB') + ')</span><br>' +
-                                         'Folder: <b>' + d.detectedFolder + '</b> | Game Serasi (<=64KB): <b>' + (d.items ? d.items.length : 0) + ' game</b>';
+                                         'Folder: <b>' + d.detectedFolder + '</b> | Game Tersedia: <b>' + (d.items ? d.items.length : 0) + ' game</b>';
                         if (d.rootFolders && d.rootFolders.length > 0) {
                             folders.innerHTML = 'Folder di kad: <span style="color:#94a3b8;">' + d.rootFolders.slice(0, 10).join(', ') + '</span>';
                         }
-                        let html = '';
-                        if (d.items && d.items.length > 0) {
-                            d.items.forEach(item => {
-                                const isBuiltin = (item.filename === 'Ice Climber.nes');
-                                html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid #1e293b;">';
-                                html += '  <div>';
-                                html += '    <div style="font-size:13px;font-weight:600;color:#fff;">🎮 ' + item.displayName + '</div>';
-                                html += '    <div style="font-size:11px;color:#94a3b8;">' + item.sizeKB + ' KB ' + (item.sizeKB <= 64 ? '<span style=\"color:#34d399;font-weight:bold;\">[Siap Main]</span>' : '<span style=\"color:#f87171;\">[Melebihi Had]</span>') + '</div>';
-                                html += '  </div>';
-                                html += '  <div style="display:flex;gap:6px;">';
-                                html += '    <button type="button" onclick="playRom(\'' + encodeURIComponent(item.filename) + '\')" style="background:#059669;color:#fff;border:none;padding:5px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:bold;">▶ Main</button>';
-                                if (!isBuiltin) {
-                                    html += '    <button type="button" onclick="deleteRom(\'' + encodeURIComponent(item.filename) + '\')" style="background:#dc2626;color:#fff;border:none;padding:5px 8px;border-radius:6px;cursor:pointer;font-size:11px;">🗑️</button>';
-                                }
-                                html += '  </div>';
-                                html += '</div>';
-                            });
-                        } else {
-                            html = '<div style="color:#fbbf24;padding:8px 0;">Tiada game <=64KB di kad. Sila muat naik fail .nes di atas.</div>';
-                        }
-                        gamesList.innerHTML = html;
                     } else {
-                        info.innerHTML = '<span style="color:#f87171;">⚠️ ' + (d.error || 'Kad MicroSD Belum Dikesan / Format Bukan FAT32') + '</span>';
-                        gamesList.innerHTML = '';
+                        info.innerHTML = '<span style="color:#38bdf8;font-weight:bold;">💾 Storan Flash ESP32 Aktif</span> <span style="font-size:11px;color:#94a3b8;">(Tiada Kad MicroSD / Bukan FAT32)</span><br>' +
+                                         'Game Tersedia: <b>' + (d.items ? d.items.length : 0) + ' game</b>';
                         folders.innerHTML = '';
                     }
+
+                    let html = '';
+                    if (d.items && d.items.length > 0) {
+                        d.items.forEach(item => {
+                            const isBuiltin = (item.filename === 'Ice Climber.nes');
+                            html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid #1e293b;">';
+                            html += '  <div>';
+                            html += '    <div style="font-size:13px;font-weight:600;color:#fff;">🎮 ' + item.displayName + (isBuiltin ? ' <span style=\"color:#facc15;font-size:10px;\">[Asal]</span>' : '') + '</div>';
+                            html += '    <div style="font-size:11px;color:#94a3b8;">' + item.sizeKB + ' KB ' + (item.sizeKB <= 64 ? '<span style=\"color:#34d399;font-weight:bold;\">[Siap Main]</span>' : '<span style=\"color:#f87171;\">[Melebihi Had]</span>') + '</div>';
+                            html += '  </div>';
+                            html += '  <div style="display:flex;gap:6px;">';
+                            html += '    <button type="button" onclick="playRom(\'' + encodeURIComponent(item.filename) + '\')" style="background:#059669;color:#fff;border:none;padding:5px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:bold;">▶ Main</button>';
+                            html += '    <button type="button" onclick="deleteRom(\'' + encodeURIComponent(item.filename) + '\')" style="background:#dc2626;color:#fff;border:none;padding:5px 8px;border-radius:6px;cursor:pointer;font-size:11px;" title="Padam game ini">🗑️</button>';
+                            html += '  </div>';
+                            html += '</div>';
+                        });
+                    } else {
+                        html = '<div style="color:#fbbf24;padding:8px 0;font-size:12px;">Tiada game dalam storan. Sila muat naik fail .nes (<=64KB) di borang atas.</div>';
+                    }
+                    gamesList.innerHTML = html;
                 })
                 .catch(() => {});
         }
@@ -286,14 +279,31 @@ static const char HTML_CONFIG_PAGE[] PROGMEM = R"rawliteral(
         }
         function deleteRom(name) {
             const decName = decodeURIComponent(name);
-            if (!confirm('Padam fail "' + decName + '" dari kad SD?')) return;
+            const promptMsg = (decName === 'Ice Climber.nes')
+                ? 'Adakah anda pasti ingin memadam game asal "Ice Climber"?\n(Boleh dipulihkan bila-bila masa melalui butang Pulihkan)'
+                : 'Padam game "' + decName + '" daripada storan?';
+            if (!confirm(promptMsg)) return;
             fetch('/api/delete_rom?name=' + name, { method: 'POST' })
                 .then(res => res.json())
                 .then(d => {
-                    alert('Fail berjaya dipadam dari kad SD!');
-                    updateSdInfo(true);
+                    if (d.status === 'ok') {
+                        alert('Game "' + decName + '" berjaya dipadam!');
+                        updateSdInfo(true);
+                    } else {
+                        alert('Ralat memadam fail: ' + (d.error || 'Gagal'));
+                    }
                 })
                 .catch(e => alert('Ralat memadam fail: ' + e));
+        }
+        function restoreBuiltin() {
+            if (!confirm('Pulihkan game asal (Ice Climber) ke dalam katalog?')) return;
+            fetch('/api/restore_builtin', { method: 'POST' })
+                .then(res => res.json())
+                .then(d => {
+                    alert(d.msg || 'Game berjaya dipulihkan!');
+                    updateSdInfo(true);
+                })
+                .catch(e => alert('Ralat: ' + e));
         }
         function rescanSd() {
             document.getElementById('sd-info').innerText = 'Sedang mengimbas semula slot MicroSD CYD...';
@@ -450,14 +460,20 @@ static void scanSdCardSafe(bool forceRescan = false) {
     g_sdCache.games.clear();
     g_sdCache.gameItems.clear();
 
-    // 1. Sentiasa sediakan Ice Climber sebagai game terbina dalam (Built-in Flash)
-    SdGameItem builtinItem;
-    builtinItem.filename = "Ice Climber.nes";
-    builtinItem.displayName = "★ Ice Climber";
-    builtinItem.sizeKB = 25;
-    builtinItem.isCompatible = true;
-    g_sdCache.gameItems.push_back(builtinItem);
-    g_sdCache.games.push_back("Ice Climber.nes (25 KB - Built-in Flash)");
+    // 1. Sediakan Ice Climber sebagai game terbina dalam jika belum dipadam pengguna
+    g_prefs.begin("minerd", true);
+    bool hideBuiltin = g_prefs.getBool("hide_builtin", false);
+    g_prefs.end();
+
+    if (!hideBuiltin) {
+        SdGameItem builtinItem;
+        builtinItem.filename = "Ice Climber.nes";
+        builtinItem.displayName = "Ice Climber";
+        builtinItem.sizeKB = 25;
+        builtinItem.isCompatible = true;
+        g_sdCache.gameItems.push_back(builtinItem);
+        g_sdCache.games.push_back("Ice Climber.nes (25 KB - Built-in Flash)");
+    }
 
     // 2. Imbas dari Kad SD jika ada
     if (sdOk) {
@@ -571,10 +587,14 @@ String getSdDetectedFolder() {
 
 std::vector<SdGameItem> getSdGameList(bool forceRescan) {
     scanSdCardSafe(forceRescan);
-    if (g_sdCache.gameItems.empty()) {
+    g_prefs.begin("minerd", true);
+    bool hideBuiltin = g_prefs.getBool("hide_builtin", false);
+    g_prefs.end();
+
+    if (g_sdCache.gameItems.empty() && !hideBuiltin) {
         SdGameItem builtinItem;
         builtinItem.filename = "Ice Climber.nes";
-        builtinItem.displayName = "★ Ice Climber";
+        builtinItem.displayName = "Ice Climber";
         builtinItem.sizeKB = 25;
         builtinItem.isCompatible = true;
         g_sdCache.gameItems.push_back(builtinItem);
@@ -814,6 +834,19 @@ static void handleApiDeleteRom() {
         if (lastSlash >= 0) filename = filename.substring(lastSlash + 1);
 
         bool deleted = false;
+
+        // 1. Semak jika pengguna memadam game asal Ice Climber
+        String lower = filename;
+        lower.toLowerCase();
+        if (lower.startsWith("ice climber") || lower.startsWith("ice_climber") || lower.startsWith("iceclimber")) {
+            g_prefs.begin("minerd", false);
+            g_prefs.putBool("hide_builtin", true);
+            g_prefs.end();
+            deleted = true;
+            Serial.println("[ROM DELETE] Game asal Ice Climber dipadam/disembunyikan.");
+        }
+
+        // 2. Padam dari kad MicroSD jika dipasang
         if (isSdCardMounted()) {
             if (g_sdMutex == NULL) g_sdMutex = xSemaphoreCreateMutex();
             if (xSemaphoreTake(g_sdMutex, pdMS_TO_TICKS(1500)) == pdTRUE) {
@@ -823,29 +856,66 @@ static void handleApiDeleteRom() {
                     Serial.printf("[SD] Fail dipadam dari SD: '%s'\n", path.c_str());
                     deleted = true;
                 }
+                path = "/" + filename;
+                if (SD.exists(path.c_str())) {
+                    SD.remove(path.c_str());
+                    deleted = true;
+                }
                 xSemaphoreGive(g_sdMutex);
             }
         }
+
+        // 3. Padam dari Flash SPIFFS dalaman ESP32
         if (initSpiffsSafe()) {
-            String path = "/" + filename;
-            if (SPIFFS.exists(path.c_str())) {
-                SPIFFS.remove(path.c_str());
-                Serial.printf("[SPIFFS] Fail dipadam dari Flash: '%s'\n", path.c_str());
+            String p1 = "/" + filename;
+            if (SPIFFS.exists(p1.c_str())) {
+                SPIFFS.remove(p1.c_str());
+                Serial.printf("[SPIFFS] Fail dipadam dari Flash: '%s'\n", p1.c_str());
                 deleted = true;
             }
-            path = "/nes/" + filename;
-            if (SPIFFS.exists(path.c_str())) {
-                SPIFFS.remove(path.c_str());
+            String p2 = "/nes/" + filename;
+            if (SPIFFS.exists(p2.c_str())) {
+                SPIFFS.remove(p2.c_str());
                 deleted = true;
+            }
+            // Cari padanan fail tanpa peka huruf besar-kecil dalam SPIFFS
+            File sDir = SPIFFS.open("/");
+            if (sDir) {
+                File f = sDir.openNextFile();
+                while (f) {
+                    String fn = String(f.name());
+                    int slash = fn.lastIndexOf('/');
+                    String bname = (slash >= 0) ? fn.substring(slash + 1) : fn;
+                    if (bname.equalsIgnoreCase(filename)) {
+                        f.close();
+                        SPIFFS.remove(fn.c_str());
+                        Serial.printf("[SPIFFS] Dipadam fail sepadan: '%s'\n", fn.c_str());
+                        deleted = true;
+                        break;
+                    }
+                    f.close();
+                    f = sDir.openNextFile();
+                }
+                sDir.close();
             }
         }
+
         g_sdCache.scanned = false;
         if (deleted) {
             g_server.send(200, "application/json", "{\"status\":\"ok\"}");
             return;
         }
     }
-    g_server.send(400, "application/json", "{\"error\":\"Gagal memadam fail\"}");
+    g_server.send(400, "application/json", "{\"error\":\"Fail tidak ditemui untuk dipadam\"}");
+}
+
+static void handleApiRestoreBuiltin() {
+    g_prefs.begin("minerd", false);
+    g_prefs.remove("hide_builtin");
+    g_prefs.end();
+    g_sdCache.scanned = false;
+    Serial.println("[PREFS] Game asal Ice Climber dipulihkan.");
+    g_server.send(200, "application/json", "{\"status\":\"ok\",\"msg\":\"Game asal (Ice Climber) telah dipulihkan!\"}");
 }
 
 static WiFiClient g_stratumClient;
@@ -954,6 +1024,7 @@ static void webServerTask(void* parameter) {
                 g_server.on("/api/sd", HTTP_GET, handleApiSd);
                 g_server.on("/api/play_rom", handleApiPlayRom);
                 g_server.on("/api/delete_rom", handleApiDeleteRom);
+                g_server.on("/api/restore_builtin", handleApiRestoreBuiltin);
                 g_server.on("/upload_rom", HTTP_POST, handleRomUploadFinish, handleRomUploadData);
                 g_server.on("/restart", HTTP_POST, handleRestart);
                 g_server.begin();

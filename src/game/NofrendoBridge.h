@@ -22,7 +22,12 @@ int runNofrendoGame(const char* romPath);
 void stopNofrendoGame();
 
 /**
- * @brief Lukis bingkai bezel kawalan sentuh D-Pad dan butang A/B pada skrin
+ * @brief Lukis overlay kawalan sentuh D-Pad (gaya cincin & panah rujukan) dan butang A/B besar
+ */
+void drawNofrendoOverlay(uint32_t activeInput = 0xFFFFFFFF);
+
+/**
+ * @brief Lukis bingkai bezel kawalan sentuh D-Pad dan butang A/B pada skrin (keserasian)
  */
 void drawNofrendoBezel();
 

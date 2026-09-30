@@ -140,29 +140,47 @@ Permainan ini direka khusus untuk **skrin sentuh (Touchscreen)** papan ESP32 tan
 
 ---
 
-## 🚀 Panduan Membina & Mem-Flash (Getting Started)
+## 📦 Pakej Pelepasan & Panduan Flash (Ready-to-Flash Release)
+
+Bagi pengguna yang ingin mem-flash peranti tanpa perlu memasang persekitaran pembangunan PlatformIO atau membuat kompilasi dari kod sumber, gunakan fail binari pelepasan siap pakai di dalam folder [`release/`](release/):
+
+### Pilihan 1: 1-Klik Flash Melalui Pelayar Web (Paling Pantas & Mudah)
+*Buka menggunakan Google Chrome / Microsoft Edge / Brave di PC atau Mac:*
+
+1. Sambungkan kabel USB peranti ESP32 CYD ke komputer.
+2. Buka salah satu Web Flasher berikut:
+   - 👉 [Espressif Web Flasher (esptool-js)](https://espressif.github.io/esptool-js/)
+   - 👉 [Adafruit WebSerial ESPTool](https://adafruit.github.io/Adafruit_WebSerial_ESPTool/)
+3. Klik **Connect** dan pilih port COM peranti anda.
+4. Muat naik fail gabungan **[`release/game-minerd-cyd-2432s028-v1.0.0-merged.bin`](release/game-minerd-cyd-2432s028-v1.0.0-merged.bin)** pada alamat/offset **`0x0`**.
+5. Tekan butang **Program / Flash** dan biarkan sehingga 100% selesai!
+
+### Pilihan 2: Skrip Automasi Flash
+- **Linux & macOS**:
+  ```bash
+  cd release
+  chmod +x flash.sh
+  ./flash.sh /dev/ttyUSB0
+  ```
+- **Windows**:
+  - Dwi-klik pada fail [`release/flash.bat`](release/flash.bat), masukkan nombor port COM anda (cth: `COM3`), dan pilih mod `1`.
+
+---
+
+## 🛠️ Kompilasi Dari Kod Sumber (Build from Source)
 
 ### Prasyarat
 - [PlatformIO Core (CLI)](https://platformio.org/) atau VS Code bersama Plugin PlatformIO.
-- Kabel USB berkualiti yang menyokong pemindahan data (bukan sekadar kabel pengecasan).
+- Kabel USB berkualiti yang menyokong pemindahan data.
 
-### Langkah-Langkah Flashing:
+### Arahan Kompilasi & Flash:
+```bash
+# 1. Bina & terus flash ke papan CYD yang disambungkan
+pio run -e esp32_cyd_2432s028 -t upload
 
-1. **Klon Repositori**:
-   ```bash
-   git clone https://github.com/maui2023/game-minerd.git
-   cd game-minerd
-   ```
-
-2. **Pilih Sasaran Papan (*Target Environment*)** dalam `platformio.ini`:
-   - `cyd_2432s028` (Cheap Yellow Display)
-   - `tdisplay_esp32` (LILYGO T-Display)
-   - `esp32_devkit_v1` (Custom Breadboard Setup)
-
-3. **Bina & Flash ke Peranti**:
-   ```bash
-   pio run -e cyd_2432s028 -t upload --upload-port /dev/ttyUSB0
-   ```
+# 2. Atau jana semula pakej pelepasan (merged bin & checksums) secara automatik
+./scripts/build_release.sh
+```
 
 ## 🌐 Pengurusan WiFi & Web Portal (Captive Portal)
 
@@ -191,7 +209,7 @@ Sistem dilengkapi ciri sambungan pintar automatik dan portal web terbina di dala
 - [x] Dual CPU Max Hash (~65-70 kH/s) apabila game berada dalam keadaan idle / screensaver.
 - [x] Enjin grafik 60 FPS pantas LovyanGFX dengan sifar flicker (zero flicker).
 - [x] Game 1: Papan Permainan Ular & Tangga Interaktif (1 hingga 4 Pemain + Bot Satoshi).
-- [x] Game 2: Retro NES 8-Bit Engine dengan On-Screen Virtual Touch Pad (D-Pad + A/B).
+- [x] Game 2: Retro NES 8-Bit Engine dengan On-Screen Overlay Touch Pad (D-Pad Cincin Bulat & Panah Rujukan + Butang A/B Ekstra Besar 42px).
 - [x] Sokongan Slot Kad Memori MicroSD CYD (Perkakasan SPI Bebas: CS=5, SCK=18, MISO=19, MOSI=23).
 - [x] Pengesanan automatik kad konsol R35S (SDHC/SDXC 128GB) & penyenaraian koleksi Game NES dari direktori `/nes`.
 - [x] Game Hub Menu untuk pemilihan permainan secara lancar melalui skrin sentuh.

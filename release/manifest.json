@@ -1,0 +1,13 @@
+{
+  "name": "game-minerd (ESP32 CYD 2.8\")",
+  "version": "1.0.0",
+  "home_assistant_domain": "game-minerd",
+  "builds": [
+    {
+      "chipFamily": "ESP32",
+      "parts": [
+        { "path": "game-minerd-cyd-2432s028-v1.0.0-merged.bin", "offset": 0 }
+      ]
+    }
+  ]
+}

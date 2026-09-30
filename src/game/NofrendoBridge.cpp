@@ -100,6 +100,140 @@ static void vid_free_write_func(int num_dirties, rect_t *dirty_rects) {
     // Kekalkan g_myBitmap sepanjang sesi supaya screen->width/height dalam vid_drv sentiasa sah
 }
 
+static uint32_t s_lastControllerVal = 0xFFFFFFFF;
+
+// -------------------------------------------------------------
+// Lukis Overlay Kawalan Sentuh Pada Permainan NES
+// (D-Pad Gaya Cincin + Panah ke Dalam, Butang A/B Besar 42px)
+// -------------------------------------------------------------
+void drawNofrendoOverlay(uint32_t activeInput) {
+    if (!g_pLcd) return;
+    g_pLcd->startWrite();
+
+    bool active_up   = !(activeInput & (1 << 0));
+    bool active_down = !(activeInput & (1 << 1));
+    bool active_left = !(activeInput & (1 << 2));
+    bool active_rgt  = !(activeInput & (1 << 3));
+    bool active_sel  = !(activeInput & (1 << 4));
+    bool active_sta  = !(activeInput & (1 << 5));
+    bool active_a    = !(activeInput & (1 << 6));
+    bool active_b    = !(activeInput & (1 << 7));
+
+    // --- 1. D-PAD BARU (Cincin Bulat + 4 Butang Panah Menghala Ke Tengah Sesuai Gambar Rujukan) ---
+    const int32_t cx = 50;
+    const int32_t cy = 168;
+
+    // Cincin Luar (Menyambungkan 4 butang arah seperti gambar rujukan pengguna)
+    uint16_t ringCol = g_pLcd->color565(148, 163, 184); // Slate 400
+    g_pLcd->drawCircle(cx, cy, 28, ringCol);
+    g_pLcd->drawCircle(cx, cy, 29, ringCol);
+
+    auto drawPad = [&](bool active, int dir) {
+        uint16_t fCol = active ? g_pLcd->color565(250, 204, 21) : g_pLcd->color565(20, 25, 35);
+        uint16_t bCol = active ? TFT_WHITE : g_pLcd->color565(226, 232, 240);
+        uint16_t iCol = active ? g_pLcd->color565(15, 23, 42) : g_pLcd->color565(203, 213, 225);
+
+        if (dir == 0) { // ATAS (Panah Menghala Ke Bawah/Pusat)
+            g_pLcd->fillRoundRect(cx - 10, cy - 38, 21, 20, 3, fCol);
+            g_pLcd->fillTriangle(cx - 10, cy - 19, cx + 10, cy - 19, cx, cy - 9, fCol);
+            g_pLcd->drawFastHLine(cx - 8, cy - 38, 17, bCol);
+            g_pLcd->drawFastVLine(cx - 10, cy - 36, 17, bCol);
+            g_pLcd->drawFastVLine(cx + 10, cy - 36, 17, bCol);
+            g_pLcd->drawLine(cx - 10, cy - 19, cx, cy - 9, bCol);
+            g_pLcd->drawLine(cx + 10, cy - 19, cx, cy - 9, bCol);
+            g_pLcd->fillTriangle(cx - 4, cy - 27, cx + 4, cy - 27, cx, cy - 21, iCol);
+        } else if (dir == 1) { // BAWAH (Panah Menghala Ke Atas/Pusat)
+            g_pLcd->fillRoundRect(cx - 10, cy + 19, 21, 20, 3, fCol);
+            g_pLcd->fillTriangle(cx - 10, cy + 19, cx + 10, cy + 19, cx, cy + 9, fCol);
+            g_pLcd->drawFastHLine(cx - 8, cy + 38, 17, bCol);
+            g_pLcd->drawFastVLine(cx - 10, cy + 19, 17, bCol);
+            g_pLcd->drawFastVLine(cx + 10, cy + 19, 17, bCol);
+            g_pLcd->drawLine(cx - 10, cy + 19, cx, cy + 9, bCol);
+            g_pLcd->drawLine(cx + 10, cy + 19, cx, cy + 9, bCol);
+            g_pLcd->fillTriangle(cx - 4, cy + 27, cx + 4, cy + 27, cx, cy + 21, iCol);
+        } else if (dir == 2) { // KIRI (Panah Menghala Ke Kanan/Pusat)
+            g_pLcd->fillRoundRect(cx - 38, cy - 10, 20, 21, 3, fCol);
+            g_pLcd->fillTriangle(cx - 19, cy - 10, cx - 19, cy + 10, cx - 9, cy, fCol);
+            g_pLcd->drawFastVLine(cx - 38, cy - 8, 17, bCol);
+            g_pLcd->drawFastHLine(cx - 36, cy - 10, 17, bCol);
+            g_pLcd->drawFastHLine(cx - 36, cy + 10, 17, bCol);
+            g_pLcd->drawLine(cx - 19, cy - 10, cx - 9, cy, bCol);
+            g_pLcd->drawLine(cx - 19, cy + 10, cx - 9, cy, bCol);
+            g_pLcd->fillTriangle(cx - 27, cy - 4, cx - 27, cy + 4, cx - 21, cy, iCol);
+        } else if (dir == 3) { // KANAN (Panah Menghala Ke Kiri/Pusat)
+            g_pLcd->fillRoundRect(cx + 19, cy - 10, 20, 21, 3, fCol);
+            g_pLcd->fillTriangle(cx + 19, cy - 10, cx + 19, cy + 10, cx + 9, cy, fCol);
+            g_pLcd->drawFastVLine(cx + 38, cy - 8, 17, bCol);
+            g_pLcd->drawFastHLine(cx + 19, cy - 10, 17, bCol);
+            g_pLcd->drawFastHLine(cx + 19, cy + 10, 17, bCol);
+            g_pLcd->drawLine(cx + 19, cy - 10, cx + 9, cy, bCol);
+            g_pLcd->drawLine(cx + 19, cy + 10, cx + 9, cy, bCol);
+            g_pLcd->fillTriangle(cx + 27, cy - 4, cx + 27, cy + 4, cx + 21, cy, iCol);
+        }
+    };
+
+    drawPad(active_up, 0);
+    drawPad(active_down, 1);
+    drawPad(active_left, 2);
+    drawPad(active_rgt, 3);
+
+    // --- 2. BUTANG AKSI B & A (DIBESARKAN: Diameter 42px untuk Mudah Ditekan) ---
+    const int32_t bx = 244, by = 182;
+    const int32_t ax = 292, ay = 134;
+
+    // Butang B (Merah Ruby)
+    uint16_t fill_b   = active_b ? g_pLcd->color565(239, 68, 68) : g_pLcd->color565(127, 29, 29);
+    uint16_t border_b = active_b ? TFT_WHITE : g_pLcd->color565(251, 113, 133);
+    g_pLcd->fillCircle(bx, by, 21, fill_b);
+    g_pLcd->drawCircle(bx, by, 21, border_b);
+    g_pLcd->drawCircle(bx, by, 20, border_b);
+    g_pLcd->setTextSize(2);
+    g_pLcd->setTextColor(TFT_WHITE, fill_b);
+    g_pLcd->drawCenterString("B", bx, by - 7);
+
+    // Butang A (Biru Azure)
+    uint16_t fill_a   = active_a ? g_pLcd->color565(56, 189, 248) : g_pLcd->color565(30, 58, 138);
+    uint16_t border_a = active_a ? TFT_WHITE : g_pLcd->color565(96, 165, 250);
+    g_pLcd->fillCircle(ax, ay, 21, fill_a);
+    g_pLcd->drawCircle(ax, ay, 21, border_a);
+    g_pLcd->drawCircle(ax, ay, 20, border_a);
+    g_pLcd->setTextSize(2);
+    g_pLcd->setTextColor(TFT_WHITE, fill_a);
+    g_pLcd->drawCenterString("A", ax, ay - 7);
+
+    // --- 3. BAR ATAS: HUB, SELECT, START ---
+    // Butang Keluar HUB (Merah)
+    g_pLcd->fillRoundRect(272, 4, 44, 20, 4, g_pLcd->color565(185, 28, 28));
+    g_pLcd->drawRoundRect(272, 4, 44, 20, 4, TFT_WHITE);
+    g_pLcd->setTextSize(1);
+    g_pLcd->setTextColor(TFT_WHITE, g_pLcd->color565(185, 28, 28));
+    g_pLcd->drawCenterString("HUB", 294, 10);
+
+    // SELECT
+    uint16_t fill_sel   = active_sel ? g_pLcd->color565(52, 211, 153) : g_pLcd->color565(20, 25, 35);
+    uint16_t border_sel = active_sel ? TFT_WHITE : g_pLcd->color565(148, 163, 184);
+    uint16_t text_sel   = active_sel ? TFT_BLACK : TFT_WHITE;
+    g_pLcd->fillRoundRect(106, 5, 48, 18, 4, fill_sel);
+    g_pLcd->drawRoundRect(106, 5, 48, 18, 4, border_sel);
+    g_pLcd->setTextColor(text_sel, fill_sel);
+    g_pLcd->drawCenterString("SELECT", 130, 10);
+
+    // START
+    uint16_t fill_sta   = active_sta ? g_pLcd->color565(52, 211, 153) : g_pLcd->color565(20, 25, 35);
+    uint16_t border_sta = active_sta ? TFT_WHITE : g_pLcd->color565(148, 163, 184);
+    uint16_t text_sta   = active_sta ? TFT_BLACK : TFT_WHITE;
+    g_pLcd->fillRoundRect(164, 5, 48, 18, 4, fill_sta);
+    g_pLcd->drawRoundRect(164, 5, 48, 18, 4, border_sta);
+    g_pLcd->setTextColor(text_sta, fill_sta);
+    g_pLcd->drawCenterString("START", 188, 10);
+
+    g_pLcd->endWrite();
+}
+
+void drawNofrendoBezel() {
+    drawNofrendoOverlay(s_lastControllerVal);
+}
+
 static void vid_custom_blit_func(bitmap_t *bmp, int num_dirties, rect_t *dirty_rects) {
     if (!g_pLcd || !bmp || !bmp->line) return;
 
@@ -113,6 +247,10 @@ static void vid_custom_blit_func(bitmap_t *bmp, int num_dirties, rect_t *dirty_r
         }
         g_pLcd->writePixels(lineBuf, 256);
     }
+
+    // Lukis overlay kawalan maya terus di atas lapisan permainan tanpa kerlipan
+    drawNofrendoOverlay(s_lastControllerVal);
+
     g_pLcd->endWrite();
 }
 
@@ -162,29 +300,58 @@ static uint32_t cyd_controller_read() {
     }
 
     if (touched && tx >= 0 && tx < 320 && ty >= 0 && ty < 240) {
-        // 1. Sentuhan pada Butang Keluar [HUB] (x >= 265 && y < 42)
-        if (tx >= 265 && ty < 42) {
+        // 1. Sentuhan pada Butang Keluar [HUB] (Top-Right: tx >= 265 && ty <= 32)
+        if (tx >= 265 && ty <= 32) {
             main_quit();
             return val;
         }
 
-        // 2. Pad Arah Maya (Kawasan Kiri: tx < 70)
-        if (tx < 70) {
-            if (ty < 85)       val ^= (1 << 0); // ATAS
-            else if (ty > 155) val ^= (1 << 1); // BAWAH
-            else if (tx < 35)  val ^= (1 << 2); // KIRI
-            else               val ^= (1 << 3); // KANAN
+        // 2. Bar Atas: SELECT & START (ty <= 35)
+        if (ty <= 35) {
+            if (tx >= 95 && tx < 155) {
+                val ^= (1 << 4); // SELECT
+            } else if (tx >= 155 && tx <= 220) {
+                val ^= (1 << 5); // START
+            }
         }
 
-        // 3. Butang Aksi Maya (Kawasan Kanan: tx >= 250)
-        if (tx >= 250) {
-            if (ty >= 45 && ty < 105)        val ^= (1 << 6); // A
-            else if (ty >= 105 && ty < 165)  val ^= (1 << 7); // B
-            else if (ty >= 165 && ty < 205)  val ^= (1 << 5); // START
-            else if (ty >= 205)              val ^= (1 << 4); // SELECT
+        // 3. Butang Aksi Besar A & B (Kawasan Jemari Kanan: tx >= 210 && ty >= 70)
+        int32_t db2 = (tx - 244) * (tx - 244) + (ty - 182) * (ty - 182);
+        int32_t da2 = (tx - 292) * (tx - 292) + (ty - 134) * (ty - 134);
+
+        if (db2 <= 1156) { // radius <= 34px
+            val ^= (1 << 7); // Butang B
+        }
+        if (da2 <= 1156) { // radius <= 34px
+            val ^= (1 << 6); // Butang A
+        }
+        // Kawasan toleransi luas sekiranya ditekan sedikit di luar jejari bulatan
+        if (tx >= 210 && ty >= 70 && !(db2 <= 1156) && !(da2 <= 1156)) {
+            if (db2 < da2 && db2 <= 2304) { // radius <= 48px
+                val ^= (1 << 7); // Butang B
+            } else if (da2 < db2 && da2 <= 2304) { // radius <= 48px
+                val ^= (1 << 6); // Butang A
+            }
+        }
+
+        // 4. Pad Arah Maya Cincin + Panah (Pusat di cx=50, cy=168)
+        int32_t dx = tx - 50;
+        int32_t dy = ty - 168;
+        int32_t dist2 = dx * dx + dy * dy;
+
+        // Zon sentuhan jemari kiri: jejari hingga 55px atau zon kiri bawah (tx <= 115, ty >= 85, dist <= 75px)
+        if (dist2 <= 3025 || (tx <= 115 && ty >= 85 && dist2 <= 5625)) {
+            // Zon mati 7px di tengah untuk elak sentuhan tidak sengaja
+            if (dist2 > 49) {
+                if (dy < -9) val ^= (1 << 0); // ATAS
+                if (dy > 9)  val ^= (1 << 1); // BAWAH
+                if (dx < -9) val ^= (1 << 2); // KIRI
+                if (dx > 9)  val ^= (1 << 3); // KANAN
+            }
         }
     }
 
+    s_lastControllerVal = val;
     return val;
 }
 
@@ -215,72 +382,6 @@ extern "C" void osd_getinput(void) {
     vTaskDelay(pdMS_TO_TICKS(1));
 }
 
-// -------------------------------------------------------------
-// Lukis Bezel Bingkai Maya (D-Pad & A/B)
-// -------------------------------------------------------------
-void drawNofrendoBezel() {
-    if (!g_pLcd) return;
-    g_pLcd->startWrite();
-    
-    // Bezel Kiri (x=0..31): Latar Belakang Gelap Kemas
-    g_pLcd->fillRect(0, 0, 32, 240, g_pLcd->color565(15, 23, 42));
-    g_pLcd->drawFastVLine(31, 0, 240, g_pLcd->color565(56, 189, 248));
-    
-    // D-Pad ATAS (y=30..62)
-    g_pLcd->fillRoundRect(3, 30, 26, 32, 4, g_pLcd->color565(30, 41, 59));
-    g_pLcd->drawRoundRect(3, 30, 26, 32, 4, TFT_SKYBLUE);
-    g_pLcd->setTextColor(TFT_WHITE, g_pLcd->color565(30, 41, 59));
-    g_pLcd->setTextSize(1);
-    g_pLcd->drawCenterString("^", 16, 38);
-    
-    // D-Pad KIRI (y=75..107)
-    g_pLcd->fillRoundRect(3, 75, 26, 32, 4, g_pLcd->color565(30, 41, 59));
-    g_pLcd->drawRoundRect(3, 75, 26, 32, 4, TFT_SKYBLUE);
-    g_pLcd->drawCenterString("<", 16, 83);
-
-    // D-Pad KANAN (y=120..152)
-    g_pLcd->fillRoundRect(3, 120, 26, 32, 4, g_pLcd->color565(30, 41, 59));
-    g_pLcd->drawRoundRect(3, 120, 26, 32, 4, TFT_SKYBLUE);
-    g_pLcd->drawCenterString(">", 16, 128);
-
-    // D-Pad BAWAH (y=165..197)
-    g_pLcd->fillRoundRect(3, 165, 26, 32, 4, g_pLcd->color565(30, 41, 59));
-    g_pLcd->drawRoundRect(3, 165, 26, 32, 4, TFT_SKYBLUE);
-    g_pLcd->drawCenterString("v", 16, 173);
-
-    // Bezel Kanan (x=288..319): Butang Aksi & Navigasi
-    g_pLcd->fillRect(288, 0, 32, 240, g_pLcd->color565(15, 23, 42));
-    g_pLcd->drawFastVLine(288, 0, 240, g_pLcd->color565(56, 189, 248));
-
-    // [HUB] Butang Keluar (y=4..32)
-    g_pLcd->fillRoundRect(290, 4, 28, 28, 4, g_pLcd->color565(225, 29, 72));
-    g_pLcd->setTextColor(TFT_WHITE, g_pLcd->color565(225, 29, 72));
-    g_pLcd->drawCenterString("HUB", 304, 12);
-
-    // [A] Butang A (y=48..82)
-    g_pLcd->fillRoundRect(290, 48, 28, 34, 4, g_pLcd->color565(37, 99, 235));
-    g_pLcd->drawRoundRect(290, 48, 28, 34, 4, TFT_WHITE);
-    g_pLcd->setTextColor(TFT_WHITE, g_pLcd->color565(37, 99, 235));
-    g_pLcd->drawCenterString("A", 304, 58);
-
-    // [B] Butang B (y=98..132)
-    g_pLcd->fillRoundRect(290, 98, 28, 34, 4, g_pLcd->color565(202, 138, 4));
-    g_pLcd->drawRoundRect(290, 98, 28, 34, 4, TFT_WHITE);
-    g_pLcd->setTextColor(TFT_WHITE, g_pLcd->color565(202, 138, 4));
-    g_pLcd->drawCenterString("B", 304, 108);
-
-    // [STA] Start (y=148..176)
-    g_pLcd->fillRoundRect(290, 148, 28, 28, 4, g_pLcd->color565(16, 185, 129));
-    g_pLcd->setTextColor(TFT_WHITE, g_pLcd->color565(16, 185, 129));
-    g_pLcd->drawCenterString("STA", 304, 156);
-
-    // [SEL] Select (y=190..218)
-    g_pLcd->fillRoundRect(290, 190, 28, 28, 4, g_pLcd->color565(71, 85, 105));
-    g_pLcd->setTextColor(TFT_WHITE, g_pLcd->color565(71, 85, 105));
-    g_pLcd->drawCenterString("SEL", 304, 198);
-
-    g_pLcd->endWrite();
-}
 
 // -------------------------------------------------------------
 // Audio / Bunyi (Dummy Stubs untuk Menjimatkan CPU & RAM)
