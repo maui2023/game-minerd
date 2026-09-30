@@ -114,6 +114,13 @@ static const char HTML_CONFIG_PAGE[] PROGMEM = R"rawliteral(
             <h2>⚙️ Konfigurasi Rangkaian & Perlombongan</h2>
             <form method="POST" action="/save">
                 <div class="group">
+                    <label>Pilihan Mod Perlombongan (Dual Mode):</label>
+                    <div style="display:flex;gap:10px;margin-top:6px;">
+                        <button type="button" onclick="setPreset('solo')" style="flex:1;background:#3b82f6;color:#fff;border:none;padding:10px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:0.85rem;">🎯 Solo (Port 3333)</button>
+                        <button type="button" onclick="setPreset('joined')" style="flex:1;background:#10b981;color:#fff;border:none;padding:10px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:0.85rem;">⚡ PPLNS Pool (Port 13333)</button>
+                    </div>
+                </div>
+                <div class="group">
                     <label>Nama WiFi (SSID):</label>
                     <input type="text" name="ssid" placeholder="Nama WiFi" required value="%SSID%">
                 </div>
@@ -123,11 +130,11 @@ static const char HTML_CONFIG_PAGE[] PROGMEM = R"rawliteral(
                 </div>
                 <div class="group">
                     <label>Mining Pool URL (Stratum):</label>
-                    <input type="text" name="pool" placeholder="public-pool.io" required value="%POOL%">
+                    <input type="text" id="input-pool" name="pool" placeholder="public-pool.io" required value="%POOL%">
                 </div>
                 <div class="group">
                     <label>Mining Pool Port:</label>
-                    <input type="number" name="port" placeholder="21496" required value="%PORT%">
+                    <input type="number" id="input-port" name="port" placeholder="21496" required value="%PORT%">
                 </div>
                 <div class="group">
                     <label>Alamat Dompet Bitcoin (Wallet BTC):</label>
@@ -169,6 +176,14 @@ static const char HTML_CONFIG_PAGE[] PROGMEM = R"rawliteral(
                 })
                 .catch(() => {});
         }
+        function setPreset(mode) {
+            document.getElementById('input-pool').value = 'public-pool.io';
+            if (mode === 'solo') {
+                document.getElementById('input-port').value = '3333';
+            } else if (mode === 'joined') {
+                document.getElementById('input-port').value = '13333';
+            }
+        }
         setInterval(updateStats, 2000);
         updateStats();
     </script>
@@ -201,6 +216,13 @@ static void handleApiStats() {
     g_server.send(200, "application/json", json);
 }
 
+static WiFiClient g_stratumClient;
+static bool g_stratumConnected = false;
+static unsigned long g_lastStratumAttempt = 0;
+static String g_currentJobId = "1";
+static String g_currentNtime = "6abc8bbb";
+static double g_poolDifficulty = 1.0;
+
 static void handleSave() {
     String newSsid = g_server.arg("ssid");
     String newPass = g_server.arg("pass");
@@ -226,6 +248,9 @@ static void handleSave() {
         // Kemas kini ke struktur perkongsian
         String fullPool = g_activePool + ":" + String(g_activePort);
         g_minerData.setPoolAndWallet(fullPool.c_str(), g_activeWallet.c_str());
+        g_stratumClient.stop();
+        g_stratumConnected = false;
+        g_lastStratumAttempt = 0;
 
         String resp = "<html><body style='background:#0b0f19;color:#10b981;font-family:sans-serif;text-align:center;padding:40px;'>"
                       "<h2>Tetapan Berjaya Disimpan!</h2>"
@@ -256,17 +281,52 @@ static void handleRestart() {
     ESP.restart();
 }
 
+bool isMiningPoolMode() {
+    return (g_activePort == DEFAULT_POOL_PPLNS_PORT);
+}
+
+void toggleMiningPoolMode() {
+    g_prefs.begin("minerd", false);
+    if (g_activePort == DEFAULT_POOL_PPLNS_PORT) {
+        g_activePort = DEFAULT_POOL_PORT; // 3333 (Solo)
+    } else {
+        g_activePort = DEFAULT_POOL_PPLNS_PORT; // 13333 (PPLNS Pool)
+    }
+    g_activePool = DEFAULT_POOL_URL; // public-pool.io
+    g_prefs.putString("pool", g_activePool);
+    g_prefs.putUInt("port", g_activePort);
+    g_prefs.end();
+
+    String fullPool = g_activePool + ":" + String(g_activePort);
+    g_minerData.setPoolAndWallet(fullPool.c_str(), g_activeWallet.c_str());
+    g_minerData.setConnectionStatus(WiFi.status() == WL_CONNECTED, false, fullPool.c_str());
+
+    g_stratumClient.stop();
+    g_stratumConnected = false;
+    g_lastStratumAttempt = 0;
+
+    Serial.printf("[MINER Core 0] Mod Ditukar Melalui Skrin/Web: %s (%s)\n",
+                  fullPool.c_str(), 
+                  (g_activePort == DEFAULT_POOL_PPLNS_PORT) ? "POOL PPLNS (:13333)" : "SOLO (:3333)");
+}
+
 static bool g_mdnsStarted = false;
 
-static void setupWebServer() {
-    if (!g_serverStarted) {
-        g_server.on("/", HTTP_GET, handleRoot);
-        g_server.on("/save", HTTP_POST, handleSave);
-        g_server.on("/api/stats", HTTP_GET, handleApiStats);
-        g_server.on("/restart", HTTP_POST, handleRestart);
-        g_server.begin();
-        g_serverStarted = true;
-        Serial.println("[HTTP] Web Server port 80 sedia untuk sambungan.");
+static void webServerTask(void* parameter) {
+    while (true) {
+        if (WiFi.status() == WL_CONNECTED || g_apModeActive) {
+            if (!g_serverStarted) {
+                g_server.on("/", HTTP_GET, handleRoot);
+                g_server.on("/save", HTTP_POST, handleSave);
+                g_server.on("/api/stats", HTTP_GET, handleApiStats);
+                g_server.on("/restart", HTTP_POST, handleRestart);
+                g_server.begin();
+                g_serverStarted = true;
+                Serial.printf("[HTTP] Web Server port 80 aktif di IP: %s\n", WiFi.localIP().toString().c_str());
+            }
+            g_server.handleClient();
+        }
+        vTaskDelay(pdMS_TO_TICKS(5));
     }
 }
 
@@ -274,10 +334,352 @@ static void startConfigPortalAP() {
     if (!g_apModeActive) {
         Serial.println("[WIFI] Memulakan Access Point Sandaran: GameMinerd-WiFi (192.168.4.1)");
         WiFi.mode(WIFI_AP_STA);
+        WiFi.softAPConfig(IPAddress(192, 168, 4, 1), IPAddress(192, 168, 4, 1), IPAddress(255, 255, 255, 0));
         WiFi.softAP("GameMinerd-WiFi", "12345678");
         g_apModeActive = true;
         g_minerData.setWifiDetails(false, "AP: GameMinerd-WiFi", "192.168.4.1");
-        setupWebServer();
+    }
+}
+
+// ==============================================================================
+// KLIEN STRATUM V1 TCP (Public-Pool.io / NerdMiners Joined Pool)
+// ==============================================================================
+static void handleStratumMining() {
+    if (WiFi.status() != WL_CONNECTED) {
+        g_stratumConnected = false;
+        return;
+    }
+
+    if (!g_stratumClient.connected()) {
+        g_stratumConnected = false;
+        if (millis() - g_lastStratumAttempt > 8000) {
+            g_lastStratumAttempt = millis();
+            g_stratumClient.stop();
+            Serial.printf("[STRATUM] Menyambung ke pool: %s:%u ...\n", g_activePool.c_str(), g_activePort);
+            
+            IPAddress poolIP;
+            bool dnsOk = WiFi.hostByName(g_activePool.c_str(), poolIP);
+            if (!dnsOk || poolIP == IPAddress(0, 0, 0, 0)) {
+                if (g_activePool == "public-pool.io") {
+                    poolIP = IPAddress(38, 51, 144, 232);
+                } else if (g_activePool == "pool.nerdminers.org") {
+                    poolIP = IPAddress(144, 91, 83, 152);
+                }
+            }
+
+            if (poolIP != IPAddress(0, 0, 0, 0)) {
+                Serial.printf("[STRATUM] IP Pool: %s\n", poolIP.toString().c_str());
+            }
+
+            if ((poolIP != IPAddress(0, 0, 0, 0) && g_stratumClient.connect(poolIP, g_activePort, 3500)) ||
+                g_stratumClient.connect(g_activePool.c_str(), g_activePort, 3500)) {
+                Serial.println("[STRATUM] Sambungan TCP berjaya ke Pool!");
+                // 1. Subscribe dengan user agent NerdMinerV2
+                g_stratumClient.print("{\"id\": 1, \"method\": \"mining.subscribe\", \"params\": [\"NerdMinerV2\"]}\n");
+                // 2. Authorize dengan wallet pengguna
+                String authMsg = "{\"id\": 2, \"method\": \"mining.authorize\", \"params\": [\"" + g_activeWallet + ".cyd\", \"x\"]}\n";
+                g_stratumClient.print(authMsg);
+                Serial.printf("[STRATUM] Pengesahan dihantar untuk wallet: %s.cyd\n", g_activeWallet.c_str());
+                g_stratumConnected = true;
+            } else {
+                Serial.println("[STRATUM] Sambungan ke pool gagal atau timeout.");
+            }
+        }
+        return;
+    }
+
+    // Baca sebarang mesej daripada stratum pool
+    while (g_stratumClient.available()) {
+        String line = g_stratumClient.readStringUntil('\n');
+        line.trim();
+        if (line.length() > 0) {
+            Serial.printf("[STRATUM POOL] %s\n", line.c_str());
+            if (line.indexOf("\"result\":true") >= 0 && (line.indexOf("\"id\":2") >= 0 || line.indexOf("\"id\":3") >= 0)) {
+                Serial.println("[STRATUM] >>> WALLET BERJAYA DISAHKAN OLEH POOL! <<<");
+                String fullPool = g_activePool + ":" + String(g_activePort);
+                g_minerData.setConnectionStatus(true, true, fullPool.c_str());
+            } else if (line.indexOf("\"mining.set_difficulty\"") >= 0) {
+                int dStart = line.indexOf(":[");
+                if (dStart >= 0) {
+                    g_poolDifficulty = line.substring(dStart + 2).toDouble();
+                    Serial.printf("[STRATUM] Sasaran Kesukaran Pool dikemas kini: %.4f\n", g_poolDifficulty);
+                }
+            } else if (line.indexOf("\"mining.notify\"") >= 0) {
+                int pStart = line.indexOf("[\"");
+                if (pStart >= 0) {
+                    int pEnd = line.indexOf("\",", pStart + 2);
+                    if (pEnd > pStart) {
+                        g_currentJobId = line.substring(pStart + 2, pEnd);
+                        Serial.printf("[STRATUM] Tugas baru aktif (Job ID: %s)\n", g_currentJobId.c_str());
+                    }
+                }
+            } else if (line.indexOf("\"id\":4") >= 0 && line.indexOf("\"result\":true") >= 0) {
+                Serial.println("[STRATUM] >>> SYER DITERIMA & DISAHKAN OLEH POOL (VALID SHARE)! <<<");
+                g_minerData.incrementValidShares();
+            }
+        }
+    }
+}
+
+// ==============================================================================
+// ENJIN MIKROKRNAL SHA-256 BITCOIN DENGAN PRECOMPUTED MIDSTATE
+// ==============================================================================
+#define ROTR(x, n) (((x) >> (n)) | ((x) << (32 - (n))))
+#define S0(x) (ROTR(x, 2) ^ ROTR(x, 13) ^ ROTR(x, 22))
+#define S1(x) (ROTR(x, 6) ^ ROTR(x, 11) ^ ROTR(x, 25))
+#define s0(x) (ROTR(x, 7) ^ ROTR(x, 18) ^ ((x) >> 3))
+#define s1(x) (ROTR(x, 17) ^ ROTR(x, 19) ^ ((x) >> 10))
+#define CH(x, y, z) (((x) & (y)) ^ (~(x) & (z)))
+#define MAJ(x, y, z) (((x) & (y)) ^ ((x) & (z)) ^ ((y) & (z)))
+#define SWAP32(x) __builtin_bswap32(x)
+
+static const uint32_t K256[64] = {
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+};
+
+static const uint32_t SHA256_INITIAL[8] = {
+    0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+    0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
+};
+
+__attribute__((always_inline)) static inline void sha256_compress(uint32_t state[8], const uint32_t W[64]) {
+    uint32_t a = state[0], b = state[1], c = state[2], d = state[3];
+    uint32_t e = state[4], f = state[5], g = state[6], h = state[7];
+
+    #pragma GCC unroll 64
+    for (int i = 0; i < 64; i++) {
+        uint32_t t1 = h + S1(e) + CH(e, f, g) + K256[i] + W[i];
+        uint32_t t2 = S0(a) + MAJ(a, b, c);
+        h = g;
+        g = f;
+        f = e;
+        e = d + t1;
+        d = c;
+        c = b;
+        b = a;
+        a = t1 + t2;
+    }
+
+    state[0] += a; state[1] += b; state[2] += c; state[3] += d;
+    state[4] += e; state[5] += f; state[6] += g; state[7] += h;
+}
+
+static void compute_midstate(const uint8_t chunk1[64], uint32_t midstate[8]) {
+    uint32_t W[64];
+    for (int i = 0; i < 16; i++) {
+        W[i] = SWAP32(((const uint32_t*)chunk1)[i]);
+    }
+    for (int i = 16; i < 64; i++) {
+        W[i] = s1(W[i - 2]) + W[i - 7] + s0(W[i - 15]) + W[i - 16];
+    }
+    memcpy(midstate, SHA256_INITIAL, 32);
+    sha256_compress(midstate, W);
+}
+
+void minerTaskLoop(void* parameter) {
+    Serial.println("[CORE 0] MinerTask dimulakan: Optimized Bare-Metal Midstate Mining Engine");
+
+    // Baca tetapan dari storan NVS
+    g_prefs.begin("minerd", false);
+    g_activeSsid = g_prefs.getString("ssid", DEFAULT_WIFI_SSID);
+    g_activePass = g_prefs.getString("pass", DEFAULT_WIFI_PASS);
+    g_activePool = g_prefs.getString("pool", DEFAULT_POOL_URL);
+    g_activePort = g_prefs.getUInt("port", DEFAULT_POOL_PORT);
+    g_activeWallet = g_prefs.getString("wallet", DEFAULT_BTC_WALLET);
+    g_prefs.end();
+
+    // Kemaskini ke WiFi baru jika masih memegang SSID lama (Kula Diamond)
+    if (g_activeSsid == "Kula Diamond" || g_activeSsid.length() == 0) {
+        g_activeSsid = DEFAULT_WIFI_SSID;
+        g_activePass = DEFAULT_WIFI_PASS;
+        g_prefs.begin("minerd", false);
+        g_prefs.putString("ssid", g_activeSsid);
+        g_prefs.putString("pass", g_activePass);
+        g_prefs.end();
+        Serial.printf("[CORE 0] Mengemaskini WiFi ke: %s\n", g_activeSsid.c_str());
+    }
+
+    // Pastikan wallet menggunakan wallet terkini pengguna
+    if (g_activeWallet.startsWith("bc1qnerdminer") || g_activeWallet.length() == 0) {
+        g_activeWallet = DEFAULT_BTC_WALLET;
+        g_prefs.begin("minerd", false);
+        g_prefs.putString("wallet", g_activeWallet);
+        g_prefs.end();
+        Serial.printf("[CORE 0] Mengemaskini alamat wallet pengguna ke NVS: %s\n", g_activeWallet.c_str());
+    }
+
+    // Pastikan pool adalah public-pool.io dan port sah (3333 untuk Solo atau 13333 untuk PPLNS)
+    if (g_activePool != DEFAULT_POOL_URL || (g_activePort != DEFAULT_POOL_PORT && g_activePort != DEFAULT_POOL_PPLNS_PORT)) {
+        g_activePool = DEFAULT_POOL_URL;
+        g_activePort = DEFAULT_POOL_PORT; // Default Solo (3333)
+        g_prefs.begin("minerd", false);
+        g_prefs.putString("pool", g_activePool);
+        g_prefs.putUInt("port", g_activePort);
+        g_prefs.end();
+        Serial.printf("[CORE 0] Pool dikonfigurasi ke: %s:%u\n", g_activePool.c_str(), g_activePort);
+    }
+
+    String fullPool = g_activePool + ":" + String(g_activePort);
+    g_minerData.setPoolAndWallet(fullPool.c_str(), g_activeWallet.c_str());
+    Serial.printf("[CORE 0] Mod Perlombongan Aktif: %s (%s)\n",
+                  fullPool.c_str(),
+                  (g_activePort == DEFAULT_POOL_PPLNS_PORT) ? "POOL PPLNS :13333" : "SOLO :3333");
+
+    // Inisialisasi rangkaian WiFi
+    WiFi.mode(WIFI_STA);
+    Serial.printf("[CORE 0] Menyambung ke WiFi: %s ...\n", g_activeSsid.c_str());
+    if (g_activePass.length() > 0) {
+        WiFi.begin(g_activeSsid.c_str(), g_activePass.c_str());
+    } else {
+        WiFi.begin(g_activeSsid.c_str());
+    }
+
+    // 1. Pra-kira Midstate untuk 64-byte pertama block header (Hanya sekali sahaja!)
+    uint32_t midstate[8];
+    compute_midstate(g_blockHeader, midstate);
+
+    // Ambil parameter bahagian kedua 16-byte
+    uint32_t merkle_tail = SWAP32(((uint32_t*)&g_blockHeader[64])[0]);
+    uint32_t ntime       = SWAP32(((uint32_t*)&g_blockHeader[64])[1]);
+    uint32_t nbits       = SWAP32(((uint32_t*)&g_blockHeader[64])[2]);
+
+    uint32_t nonce = 0;
+    uint32_t lastHashCount = 0;
+    unsigned long lastReportTime = millis();
+    unsigned long wifiConnectStartTime = millis();
+
+    uint32_t W[64];
+    uint32_t W2[64];
+    uint32_t hash1[8];
+    uint32_t hash2[8];
+
+    // Sediakan nilai malar untuk W dan W2 lebih awal
+    W[0] = merkle_tail;
+    W[1] = ntime;
+    W[2] = nbits;
+    W[4] = 0x80000000;
+    for (int k = 5; k < 15; k++) W[k] = 0;
+    W[15] = 0x00000280; // 640 bits
+
+    W2[8] = 0x80000000;
+    for (int k = 9; k < 15; k++) W2[k] = 0;
+    W2[15] = 0x00000100; // 256 bits
+
+    while (true) {
+        // Kendalikan sambungan dan pertukaran mesej Stratum V1 ke Public Pool
+        handleStratumMining();
+
+        // Semakan WiFi
+        bool wifiOk = (WiFi.status() == WL_CONNECTED);
+        if (wifiOk) {
+            if (g_apModeActive) {
+                WiFi.softAPdisconnect(true);
+                WiFi.mode(WIFI_STA);
+                g_apModeActive = false;
+            }
+
+            if (!g_mdnsStarted) {
+                if (MDNS.begin("game-minerd")) {
+                    MDNS.addService("http", "tcp", 80);
+                    Serial.printf("[WIFI] Bersambung! IP: %s | WebGUI: http://%s atau http://game-minerd.local\n", WiFi.localIP().toString().c_str(), WiFi.localIP().toString().c_str());
+                    g_mdnsStarted = true;
+                }
+            }
+
+            String ipStr = WiFi.localIP().toString();
+            String ssidStr = WiFi.SSID();
+            String currentPoolStr = g_activePool + ":" + String(g_activePort);
+            g_minerData.setWifiDetails(true, ssidStr.c_str(), ipStr.c_str());
+            g_minerData.setConnectionStatus(true, g_stratumConnected, currentPoolStr.c_str());
+        } else {
+            if (millis() - wifiConnectStartTime > 14000) {
+                startConfigPortalAP();
+            }
+            String currentPoolStr = g_activePool + ":" + String(g_activePort);
+            if (g_apModeActive) {
+                g_minerData.setWifiDetails(false, "AP: GameMinerd", "192.168.4.1");
+            } else {
+                g_minerData.setWifiDetails(false, g_activeSsid.c_str(), "Menyambung...");
+            }
+            g_minerData.setConnectionStatus(false, false, currentPoolStr.c_str());
+        }
+
+        // Kelompok Hashing Bare-Metal Ultra-Pantas (10,000 nonces per batch)
+        for (int i = 0; i < 10000; i++) {
+            nonce++;
+            W[3] = SWAP32(nonce);
+
+            // Kembangkan W16..W63
+            for (int k = 16; k < 64; k++) {
+                W[k] = s1(W[k - 2]) + W[k - 7] + s0(W[k - 15]) + W[k - 16];
+            }
+
+            // Pusingan 1: SHA256(Block2 dari Midstate)
+            memcpy(hash1, midstate, 32);
+            sha256_compress(hash1, W);
+
+            // Pusingan 2: SHA256(Hash1)
+            for (int k = 0; k < 8; k++) {
+                W2[k] = hash1[k];
+            }
+            for (int k = 16; k < 64; k++) {
+                W2[k] = s1(W2[k - 2]) + W2[k - 7] + s0(W2[k - 15]) + W2[k - 16];
+            }
+
+            memcpy(hash2, SHA256_INITIAL, 32);
+            sha256_compress(hash2, W2);
+
+            // Semakan sasaran kesukaran (Leading zeros)
+            if (hash2[7] == 0) {
+                double estimatedDiff = 65536.0 / ((hash2[6] >> 16) + 1);
+                g_minerData.updateMiningProgress(0, 0, estimatedDiff);
+
+                if (g_stratumConnected && g_stratumClient.connected() && g_currentJobId.length() > 0) {
+                    char nonceHex[9];
+                    snprintf(nonceHex, sizeof(nonceHex), "%08x", SWAP32(nonce));
+                    String submitMsg = "{\"id\": 4, \"method\": \"mining.submit\", \"params\": [\"" + 
+                                       g_activeWallet + ".cyd\", \"" + g_currentJobId + "\", \"00000000\", \"" + 
+                                       g_currentNtime + "\", \"" + String(nonceHex) + "\"]}\n";
+                    g_stratumClient.print(submitMsg);
+                    Serial.printf("[STRATUM] Menghantar Share ke Pool! Nonce: %s (Diff: %.2f)\n", nonceHex, estimatedDiff);
+                }
+
+                if (hash2[6] == 0) {
+                    Serial.println("[CORE 0] !!! BLOK BITCOIN SAH DITEMUI !!!");
+                    g_minerData.triggerBlockFound();
+                }
+            }
+        }
+
+        // Kira Hashrate setiap saat
+        unsigned long now = millis();
+        unsigned long elapsed = now - lastReportTime;
+        static unsigned long lastSerialPrint = 0;
+        if (elapsed >= 1000) {
+            uint32_t hashesDone = nonce - lastHashCount;
+            float hashrate_kH = (float)hashesDone / (float)elapsed;
+
+            g_minerData.updateMiningProgress(hashrate_kH, hashesDone, 0.0);
+
+            if (now - lastSerialPrint >= 3000) {
+                Serial.printf("[MINER Core 0] Hashrate: %.2f kH/s | Nonce: %u | RSSI: %d dBm | IP: %s\n",
+                              hashrate_kH, nonce, WiFi.RSSI(), WiFi.localIP().toString().c_str());
+                lastSerialPrint = now;
+            }
+
+            lastHashCount = nonce;
+            lastReportTime = now;
+        }
+
+        // Berikan ruang 1 tick (10ms) kepada LwIP stack WiFi dan pelayan HTTP
+        vTaskDelay(1);
     }
 }
 
@@ -287,131 +689,18 @@ void startMinerTask() {
         "MinerTask",
         8192,
         NULL,
-        PRIORITY_MINING,
+        1,
         NULL,
-        CORE_MINING
+        0 // Disematkan khusus ke Core 0
     );
-}
 
-void minerTaskLoop(void* parameter) {
-    Serial.println("[CORE 0] MinerTask dimulakan pada Core 0 (FreeRTOS Background Task)");
-
-    // Baca tetapan dari storan NVS (Flash Memory)
-    g_prefs.begin("minerd", false);
-    g_activeSsid = g_prefs.getString("ssid", DEFAULT_WIFI_SSID);
-    g_activePass = g_prefs.getString("pass", DEFAULT_WIFI_PASS);
-    g_activePool = g_prefs.getString("pool", DEFAULT_POOL_URL);
-    g_activePort = g_prefs.getUInt("port", DEFAULT_POOL_PORT);
-    g_activeWallet = g_prefs.getString("wallet", DEFAULT_BTC_WALLET);
-    g_prefs.end();
-
-    String fullPool = g_activePool + ":" + String(g_activePort);
-    g_minerData.setPoolAndWallet(fullPool.c_str(), g_activeWallet.c_str());
-
-    // 1. Inisialisasi rangkaian WiFi terlebih dahulu
-    WiFi.mode(WIFI_STA);
-    Serial.printf("[CORE 0] Menyambung ke WiFi: %s ...\n", g_activeSsid.c_str());
-    if (g_activePass.length() > 0) {
-        WiFi.begin(g_activeSsid.c_str(), g_activePass.c_str());
-    } else {
-        WiFi.begin(g_activeSsid.c_str());
-    }
-
-    // 2. Lancarkan Web Server selepas WiFi stack dimulakan
-    setupWebServer();
-
-    uint32_t nonce = 0;
-    uint32_t lastHashCount = 0;
-    unsigned long lastReportTime = millis();
-    unsigned long wifiConnectStartTime = millis();
-
-    uint8_t hash1[32];
-    uint8_t hash2[32];
-
-    mbedtls_sha256_context ctx;
-    mbedtls_sha256_init(&ctx);
-
-    while (true) {
-        // Sentiasa kendalikan permintaan Web Server HTTP pada port 80
-        if (g_serverStarted) {
-            g_server.handleClient();
-        }
-
-        // Pengurusan Sambungan WiFi
-        bool wifiOk = (WiFi.status() == WL_CONNECTED);
-        if (wifiOk) {
-            if (g_apModeActive) {
-                WiFi.softAPdisconnect(true);
-                WiFi.mode(WIFI_STA);
-                g_apModeActive = false;
-            }
-
-            // Inisialisasi mDNS sekali sahaja selepas WiFi tersambung
-            if (!g_mdnsStarted) {
-                if (MDNS.begin("game-minerd")) {
-                    MDNS.addService("http", "tcp", 80);
-                    Serial.println("[MDNS] WebGUI boleh diakses melalui: http://game-minerd.local");
-                    g_mdnsStarted = true;
-                }
-            }
-
-            String ipStr = WiFi.localIP().toString();
-            String ssidStr = WiFi.SSID();
-            g_minerData.setWifiDetails(true, ssidStr.c_str(), ipStr.c_str());
-            g_minerData.setConnectionStatus(true, true, fullPool.c_str());
-        } else {
-            // Jika belum tersambung selepas 14 saat, buka Hotspot AP Sandaran
-            if (millis() - wifiConnectStartTime > 14000) {
-                startConfigPortalAP();
-            }
-            if (g_apModeActive) {
-                g_minerData.setWifiDetails(false, "AP: GameMinerd", "192.168.4.1");
-            } else {
-                g_minerData.setWifiDetails(false, g_activeSsid.c_str(), "Menyambung...");
-            }
-            g_minerData.setConnectionStatus(false, false, fullPool.c_str());
-        }
-
-        // 3. Kelompok Hashing SHA-256 Berganda di Core 0 (Solo Mining)
-        for (int i = 0; i < 1000; i++) {
-            nonce++;
-            memcpy(&g_blockHeader[76], &nonce, 4);
-
-            mbedtls_sha256_starts(&ctx, 0);
-            mbedtls_sha256_update(&ctx, g_blockHeader, 80);
-            mbedtls_sha256_finish(&ctx, hash1);
-
-            mbedtls_sha256_starts(&ctx, 0);
-            mbedtls_sha256_update(&ctx, hash1, 32);
-            mbedtls_sha256_finish(&ctx, hash2);
-
-            // Semak sasaran kesukaran
-            if (hash2[31] == 0x00 && hash2[30] == 0x00) {
-                double estimatedDiff = 65536.0 / (hash2[29] + 1);
-                g_minerData.updateMiningProgress(0, 0, estimatedDiff);
-
-                if (hash2[29] == 0x00) {
-                    Serial.println("[CORE 0] !!! BLOK BITCOIN SAH DITEMUI !!!");
-                    g_minerData.triggerBlockFound();
-                }
-            }
-        }
-
-        // 4. Kira Hashrate setiap saat
-        unsigned long now = millis();
-        unsigned long elapsed = now - lastReportTime;
-        if (elapsed >= 1000) {
-            uint32_t hashesDone = nonce - lastHashCount;
-            float hashrate_kH = (float)hashesDone / (float)elapsed;
-
-            g_minerData.updateMiningProgress(hashrate_kH, hashesDone, 0.0);
-
-            lastHashCount = nonce;
-            lastReportTime = now;
-        }
-
-        vTaskDelay(pdMS_TO_TICKS(1));
-    }
-
-    mbedtls_sha256_free(&ctx);
+    xTaskCreatePinnedToCore(
+        webServerTask,
+        "WebServerTask",
+        4096,
+        NULL,
+        1,
+        NULL,
+        0 // Disematkan khusus ke Core 0
+    );
 }

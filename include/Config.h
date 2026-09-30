@@ -69,13 +69,14 @@
 // ==============================================================================
 // 2. DEFAULT SOLO MINING CONFIGURATION
 // ==============================================================================
-#define DEFAULT_WIFI_SSID       "Kula Diamond"
-#define DEFAULT_WIFI_PASS       "T5005424"
+#define DEFAULT_WIFI_SSID       "MiQaNoMeira_2.4G"
+#define DEFAULT_WIFI_PASS       "Komando@2023"
 
-// Default Solo Mining Pool (Public-Pool.io atau Solo CKPool)
+// Default Mining Pool (public-pool.io: Solo = 3333, PPLNS Pool = 13333)
 #define DEFAULT_POOL_URL        "public-pool.io"
-#define DEFAULT_POOL_PORT       21496
-#define DEFAULT_BTC_WALLET      "bc1qnerdminerhandheldgamers2026xxxxxx"
+#define DEFAULT_POOL_PORT       3333
+#define DEFAULT_POOL_PPLNS_PORT 13333
+#define DEFAULT_BTC_WALLET      "bc1q065llaash5vkv06v3zmts8jte8yuz6j7qtrnee"
 
 // ==============================================================================
 // 3. FREERTOS TASK ALLOCATION

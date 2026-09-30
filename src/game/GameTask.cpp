@@ -3,6 +3,7 @@
 #include "DisplayDriver.h"
 #include "MinerSharedData.h"
 #include "SnakesAndLadders.h"
+#include "miner/MinerTask.h"
 
 static LGFX lcd;
 static LGFX_Sprite hudSprite(&lcd);
@@ -34,24 +35,36 @@ static void drawMiniMiningHUD(const MinerStats& stats) {
 
     hudSprite.setTextSize(1);
     
-    // 1. Hashrate info
-    char hrBuf[32];
-    snprintf(hrBuf, sizeof(hrBuf), "[*] %.1f kH", stats.currentHashrate);
+    // 1. Hashrate info (Kiri)
+    char hrBuf[24];
+    snprintf(hrBuf, sizeof(hrBuf), "%.1fk", stats.currentHashrate);
     hudSprite.setTextColor(TFT_GREENYELLOW, hudSprite.color565(15, 23, 42));
     hudSprite.drawString(hrBuf, 4, 7);
 
-    // 2. IP Address info
-    char ipBuf[40];
-    snprintf(ipBuf, sizeof(ipBuf), "IP: %s", stats.ipAddress);
-    hudSprite.setTextColor(stats.isWifiConnected ? TFT_CYAN : TFT_ORANGE, hudSprite.color565(15, 23, 42));
-    hudSprite.drawString(ipBuf, 85, 7);
+    // 2. Butang Sentuh Solo / Pool Mode (x=50..104)
+    bool isPool = isMiningPoolMode();
+    uint16_t btnColor = isPool ? hudSprite.color565(16, 185, 129) : hudSprite.color565(37, 99, 235);
+    hudSprite.fillRoundRect(50, 3, 54, 18, 3, btnColor);
+    hudSprite.setTextColor(TFT_WHITE, btnColor);
+    hudSprite.drawCenterString(isPool ? "POOL" : "SOLO", 50 + 27, 5);
 
-    // 3. WiFi SSID info (Sebelah kanan)
-    char wfBuf[32];
-    snprintf(wfBuf, sizeof(wfBuf), "WF: %.10s", stats.wifiSSID);
+    // 3. IP Address info (x=110..195)
+    char ipBuf[32];
+    snprintf(ipBuf, sizeof(ipBuf), "%s", stats.ipAddress);
+    hudSprite.setTextColor(stats.isWifiConnected ? TFT_CYAN : TFT_ORANGE, hudSprite.color565(15, 23, 42));
+    hudSprite.drawString(ipBuf, 110, 7);
+
+    // 4. WiFi SSID info (x=202..265)
+    char wfBuf[24];
+    snprintf(wfBuf, sizeof(wfBuf), "%.9s", stats.wifiSSID);
     uint16_t wfColor = stats.isWifiConnected ? TFT_GREEN : TFT_YELLOW;
     hudSprite.setTextColor(wfColor, hudSprite.color565(15, 23, 42));
-    hudSprite.drawString(wfBuf, hudSprite.width() - 88, 7);
+    hudSprite.drawString(wfBuf, 202, 7);
+
+    // 5. Butang Putar Skrin (x=272..316)
+    hudSprite.fillRoundRect(272, 3, 44, 18, 3, hudSprite.color565(51, 65, 85));
+    hudSprite.setTextColor(TFT_SILVER, hudSprite.color565(51, 65, 85));
+    hudSprite.drawCenterString("ROT", 272 + 22, 5);
 
     // Tolak sprite ke skrin (Pantas melalui DMA, sifar flicker)
     hudSprite.pushSprite(0, 0);
@@ -64,71 +77,82 @@ static void drawMinerDashboard(const MinerStats& stats) {
     lcd.fillRect(0, 0, lcd.width(), 32, lcd.color565(24, 34, 58));
     lcd.setTextColor(TFT_GOLD, lcd.color565(24, 34, 58));
     lcd.setTextSize(1);
-    lcd.drawCenterString("=== NERDMINER + GAME-MINERD ===", lcd.width() / 2, 5);
+    lcd.drawCenterString("=== PUBLIC-POOL.IO + GAME-MINERD ===", lcd.width() / 2, 5);
     lcd.setTextColor(TFT_SILVER, lcd.color565(24, 34, 58));
-    lcd.drawCenterString("Background Solo Mining Engine Active (Core 0)", lcd.width() / 2, 18);
+    lcd.drawCenterString("Background Solo/Pool Stratum Mining (Core 0)", lcd.width() / 2, 18);
 
     // Kad 1: Hashrate (Kiri atas)
     int cardW = (lcd.width() - 30) / 2;
-    lcd.fillRect(10, 38, cardW, 56, lcd.color565(15, 23, 42));
-    lcd.drawRect(10, 38, cardW, 56, lcd.color565(56, 189, 248));
+    lcd.fillRect(10, 36, cardW, 52, lcd.color565(15, 23, 42));
+    lcd.drawRect(10, 36, cardW, 52, lcd.color565(56, 189, 248));
     lcd.setTextColor(TFT_SKYBLUE, lcd.color565(15, 23, 42));
-    lcd.drawString("SOLO HASHRATE", 16, 44);
+    lcd.drawString("HASHRATE AKTIF", 16, 40);
     char hrBuf[32];
     snprintf(hrBuf, sizeof(hrBuf), "%.2f kH/s", stats.currentHashrate);
     lcd.setTextColor(TFT_GREENYELLOW, lcd.color565(15, 23, 42));
     lcd.setTextSize(2);
-    lcd.drawString(hrBuf, 16, 62);
+    lcd.drawString(hrBuf, 16, 56);
     lcd.setTextSize(1);
 
     // Kad 2: WiFi & Network (Kanan atas)
     int card2X = 10 + cardW + 10;
-    lcd.fillRect(card2X, 38, cardW, 56, lcd.color565(15, 23, 42));
-    lcd.drawRect(card2X, 38, cardW, 56, stats.isWifiConnected ? TFT_GREEN : TFT_ORANGE);
+    lcd.fillRect(card2X, 36, cardW, 52, lcd.color565(15, 23, 42));
+    lcd.drawRect(card2X, 36, cardW, 52, stats.isWifiConnected ? TFT_GREEN : TFT_ORANGE);
     lcd.setTextColor(TFT_WHITE, lcd.color565(15, 23, 42));
-    lcd.drawString("RANGKAIAN (WIFI)", card2X + 6, 44);
+    lcd.drawString("RANGKAIAN (WIFI)", card2X + 6, 40);
     
     char ssidLine[32];
     snprintf(ssidLine, sizeof(ssidLine), "SSID: %.14s", stats.wifiSSID);
     lcd.setTextColor(stats.isWifiConnected ? TFT_GREEN : TFT_YELLOW, lcd.color565(15, 23, 42));
-    lcd.drawString(ssidLine, card2X + 6, 58);
+    lcd.drawString(ssidLine, card2X + 6, 54);
 
     char ipLine[32];
     snprintf(ipLine, sizeof(ipLine), "IP  : %s", stats.ipAddress);
     lcd.setTextColor(stats.isWifiConnected ? TFT_CYAN : TFT_RED, lcd.color565(15, 23, 42));
-    lcd.drawString(ipLine, card2X + 6, 72);
+    lcd.drawString(ipLine, card2X + 6, 68);
 
-    // Kad 3: Detail Statistik Perlombongan (Bawah)
-    int statsY = 100;
-    lcd.fillRect(10, statsY, lcd.width() - 20, 105, lcd.color565(15, 23, 42));
-    lcd.drawRect(10, statsY, lcd.width() - 20, 105, lcd.color565(71, 85, 105));
+    // Kad 3: Detail Statistik Perlombongan
+    int statsY = 94;
+    lcd.fillRect(10, statsY, lcd.width() - 20, 74, lcd.color565(15, 23, 42));
+    lcd.drawRect(10, statsY, lcd.width() - 20, 74, lcd.color565(71, 85, 105));
 
     lcd.setTextColor(TFT_GOLD, lcd.color565(15, 23, 42));
-    lcd.drawString("STATISTIK SOLO MINING BITCOIN", 18, statsY + 6);
-    lcd.drawFastHLine(18, statsY + 18, lcd.width() - 36, lcd.color565(51, 65, 85));
+    lcd.drawString("STATISTIK PERLOMBONGAN BITCOIN", 16, statsY + 5);
+    lcd.drawFastHLine(16, statsY + 16, lcd.width() - 32, lcd.color565(51, 65, 85));
 
     lcd.setTextColor(TFT_WHITE, lcd.color565(15, 23, 42));
     char line[64];
-    snprintf(line, sizeof(line), "Jumlah Hash    : %u", stats.totalHashes);
-    lcd.drawString(line, 18, statsY + 24);
+    snprintf(line, sizeof(line), "Jumlah Hash: %u  |  Valid Shares: %u", stats.totalHashes, stats.validShares);
+    lcd.drawString(line, 16, statsY + 22);
 
-    snprintf(line, sizeof(line), "Valid Shares   : %u", stats.validShares);
-    lcd.drawString(line, 18, statsY + 38);
+    snprintf(line, sizeof(line), "Best Diff  : %.2f  |  Pool: %s", stats.bestDifficulty, stats.activePool);
+    lcd.drawString(line, 16, statsY + 36);
 
-    snprintf(line, sizeof(line), "Best Difficulty: %.2f", stats.bestDifficulty);
-    lcd.drawString(line, 18, statsY + 52);
+    snprintf(line, sizeof(line), "Dompet BTC : %.16s...", stats.btcAddress);
+    lcd.drawString(line, 16, statsY + 50);
 
-    snprintf(line, sizeof(line), "Mining Pool    : %s", stats.activePool);
-    lcd.drawString(line, 18, statsY + 66);
+    // Butang Sentuh Besar: Pertukaran Mod Solo <-> Pool PPLNS
+    bool isPool = isMiningPoolMode();
+    uint16_t btnBg = isPool ? lcd.color565(16, 185, 129) : lcd.color565(37, 99, 235);
+    lcd.fillRoundRect(10, 174, lcd.width() - 20, 36, 6, btnBg);
+    lcd.drawRoundRect(10, 174, lcd.width() - 20, 36, 6, TFT_WHITE);
 
-    snprintf(line, sizeof(line), "Status WiFi    : %s", stats.isWifiConnected ? "ONLINE (Disambung)" : "Menyambung...");
-    lcd.setTextColor(stats.isWifiConnected ? TFT_GREEN : TFT_ORANGE, lcd.color565(15, 23, 42));
-    lcd.drawString(line, 18, statsY + 80);
+    if (isPool) {
+        lcd.setTextColor(TFT_WHITE, btnBg);
+        lcd.drawCenterString("[ MOD POOL PPLNS (Port 13333) ]", lcd.width() / 2, 178);
+        lcd.setTextColor(TFT_YELLOW, btnBg);
+        lcd.drawCenterString(">> SENTUH UNTUK TUKAR KE SOLO (3333) <<", lcd.width() / 2, 193);
+    } else {
+        lcd.setTextColor(TFT_WHITE, btnBg);
+        lcd.drawCenterString("[ MOD SOLO MINING (Port 3333) ]", lcd.width() / 2, 178);
+        lcd.setTextColor(TFT_YELLOW, btnBg);
+        lcd.drawCenterString(">> SENTUH UNTUK TUKAR KE POOL (13333) <<", lcd.width() / 2, 193);
+    }
 
     // Footer Hint
-    lcd.fillRect(0, lcd.height() - 24, lcd.width(), 24, lcd.color565(30, 41, 59));
-    lcd.setTextColor(TFT_YELLOW, lcd.color565(30, 41, 59));
-    lcd.drawCenterString(">> Sentuh Skrin Untuk Kembali Main Ular & Tangga <<", lcd.width() / 2, lcd.height() - 17);
+    lcd.fillRect(0, 218, lcd.width(), 22, lcd.color565(15, 23, 42));
+    lcd.setTextColor(TFT_SILVER, lcd.color565(15, 23, 42));
+    lcd.drawCenterString(">> Sentuh Bawah Untuk Kembali Main Ular & Tangga <<", lcd.width() / 2, 224);
 }
 
 void gameTaskLoop(void* parameter) {
@@ -169,20 +193,43 @@ void gameTaskLoop(void* parameter) {
         if (touched || btnBoot) {
             lastUserInputTime = millis();
 
-            // Pintasan Sentuhan: Sentuh penjuru kanan HUD untuk putar skrin 180 darjah
-            if (touched && touchY < 25 && touchX > 220) {
-                currentRotation = (currentRotation == 3) ? 1 : 3;
-                lcd.setRotation(currentRotation);
-                lcd.fillScreen(TFT_BLACK);
-                game.needBoardRedraw = true;
-                game.needPanelRedraw = true;
-                modeSwitched = true;
-                vTaskDelay(pdMS_TO_TICKS(400));
-                continue;
-            }
+            if (currentMode == MODE_GAME && touched) {
+                // Sentuhan di bar HUD atas (touchY < 25)
+                if (touchY < 25) {
+                    // Butang Tukar Mod Solo <-> Pool (x=45..108)
+                    if (touchX >= 45 && touchX <= 108) {
+                        toggleMiningPoolMode();
+                        drawMiniMiningHUD(g_minerData.getStats());
+                        vTaskDelay(pdMS_TO_TICKS(350));
+                        continue;
+                    }
+                    // Butang Putar Skrin 180 darjah (x > 265)
+                    if (touchX > 265) {
+                        currentRotation = (currentRotation == 3) ? 1 : 3;
+                        lcd.setRotation(currentRotation);
+                        lcd.fillScreen(TFT_BLACK);
+                        game.needBoardRedraw = true;
+                        game.needPanelRedraw = true;
+                        modeSwitched = true;
+                        vTaskDelay(pdMS_TO_TICKS(400));
+                        continue;
+                    }
+                }
 
-            // Jika dalam mod dashboard dan skrin disentuh, tukar kembali ke Game
-            if (currentMode == MODE_MINER_DASHBOARD) {
+                // Kawasan permainan Ular & Tangga: baling dadu
+                if (game.handleTouch(touchX, touchY)) {
+                    vTaskDelay(pdMS_TO_TICKS(180));
+                }
+            } else if (currentMode == MODE_MINER_DASHBOARD && touched) {
+                // Butang Tukar Mod Solo <-> Pool di Dashboard (y=170..214)
+                if (touchY >= 170 && touchY <= 214) {
+                    toggleMiningPoolMode();
+                    drawMinerDashboard(g_minerData.getStats());
+                    vTaskDelay(pdMS_TO_TICKS(350));
+                    continue;
+                }
+
+                // Sentuh di luar butang mod untuk kembali ke game
                 currentMode = MODE_GAME;
                 lcd.fillScreen(TFT_BLACK);
                 game.needBoardRedraw = true;
@@ -190,15 +237,6 @@ void gameTaskLoop(void* parameter) {
                 modeSwitched = true;
                 vTaskDelay(pdMS_TO_TICKS(250));
                 continue;
-            }
-
-            // Dalam Mod Permainan: Sentuh untuk baling dadu
-            if (currentMode == MODE_GAME) {
-                if (touched) {
-                    if (game.handleTouch(touchX, touchY)) {
-                        vTaskDelay(pdMS_TO_TICKS(180));
-                    }
-                }
             }
         }
 

@@ -13,4 +13,14 @@ void startMinerTask();
  */
 void minerTaskLoop(void* parameter);
 
+/**
+ * @brief Menukar mod antara Solo (:3333) dan Pool PPLNS (:13333) di public-pool.io
+ */
+void toggleMiningPoolMode();
+
+/**
+ * @brief Semak adakah sedang dalam mod POOL PPLNS (port 13333)
+ */
+bool isMiningPoolMode();
+
 #endif // MINER_TASK_H

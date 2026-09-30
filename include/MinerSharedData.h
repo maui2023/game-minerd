@@ -98,6 +98,13 @@ public:
         }
     }
 
+    void incrementValidShares() {
+        if (xSemaphoreTake(mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+            stats.validShares++;
+            xSemaphoreGive(mutex);
+        }
+    }
+
     MinerStats getStats() {
         MinerStats copy;
         if (xSemaphoreTake(mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
